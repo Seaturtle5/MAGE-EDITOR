@@ -31,6 +31,8 @@ func preview_content() -> ContentDB:
 			var result := FscParser.parse(documents[path].text, path)
 			preview_db._parse_results.append(result)
 			for definition: FscParser.Definition in result.definitions:
+				if definition.type == "pack":
+					preview_db.packs.append({"id": definition.id, "path": found[id].path, "def": definition})
 				preview_db._add(definition, result)
 	preview_db._finish()
 	preview_revision = revision

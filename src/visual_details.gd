@@ -138,11 +138,12 @@ func _refresh() -> void:
 	var sections: Array[Dictionary] = [{"key": "overview", "title": "Overview"}]
 	if d.type == "event":
 		sections.append_array([{"key": "when", "title": "When & where"}, {"key": "conditions", "title": "Conditions"}])
+	if d.type == "condition": sections.append({"key": "bonuses", "title": "Temporary bonuses"})
 	if d.type == "item": sections.append({"key": "use", "title": "Use & reactions"})
 	sections.append_array([{"key": "stories", "title": "Stories"}, {"key": "settings", "title": "Settings"}, {"key": "properties", "title": "Properties"}])
 	layout.set_sections(sections, section)
 	_build_summary()
-	var titles := {"overview": "The essentials", "when": "When does it happen?", "conditions": "What needs to be true?", "stories": "Write what happens", "settings": "Other settings", "properties": "What can this content do?", "use": "When the player uses this item"}
+	var titles := {"overview": "The essentials", "when": "When does it happen?", "conditions": "What needs to be true?", "stories": "Write what happens", "settings": "Other settings", "properties": "What can this content do?", "use": "When the player uses this item", "bonuses": "What changes while this is active?"}
 	body.add_child(AuthoringLayout.label(titles.get(section, "Details"), 24))
 	var hints := {"overview": "Start with the basics, then choose a section above.", "when": "Choose how the player finds this event and where it can happen.", "conditions": "Choose requirements and how often this event can run.", "stories": "Choose an interaction to write. Existing passages stay connected to this content.", "settings": "Adjust the settings already used by this content.", "properties": "Browse every available property, including ones already in use. Choose one to see what it does.", "use": "Write the use story, choose reactions and decide whether the item is used up."}
 	_event_note(hints.get(section, ""))
@@ -163,6 +164,8 @@ func _refresh() -> void:
 		"overview":
 			_add_section("", basics, schema)
 			var destinations: Array = [["Stories & interactions", "Write passages and player responses.", "stories"], ["Settings", "Adjust values and other existing settings.", "settings"], ["Browse all properties", "Find what this content can do, with categories and explanations.", "properties"]]
+			if d.type == "condition":
+				destinations.push_front(["Temporary bonuses", "Change attributes, then apply this condition from a story or item for a chosen duration.", "bonuses"])
 			if d.type == "item":
 				destinations.push_front(["Use & reactions", "Set healing, food effects, mutation and whether this item is used up.", "use"])
 			if d.type == "event":
@@ -178,6 +181,34 @@ func _refresh() -> void:
 			if settings.is_empty(): _event_note("No additional settings yet. Browse Properties to choose one.")
 		"properties": _add_property_catalog(schema)
 		"use": _add_item_use()
+		"bonuses": _add_bonus_flow()
+
+func _add_bonus_flow() -> void:
+	_event_note("These attribute changes last until the condition expires. Choose the duration when applying it from a story or item.")
+	_add_rows("while active", "bonuses")
+	var repeated := AuthoringLayout.choice("Every active turn", "Open repeated actions, such as restoring 5 health. Runs before the final expiry turn.")
+	repeated.disabled = not row.doc.writable and not row.def.fields.has("each turn")
+	repeated.pressed.connect(func() -> void:
+		if pending_rows: problem.emit("Apply or discard your bonus edits first."); return
+		story_requested.emit(row, "each turn"))
+	body.add_child(repeated)
+	var reaction := Button.new()
+	reaction.text = "+ Add repeated reaction"
+	reaction.disabled = not row.doc.writable
+	reaction.pressed.connect(func() -> void:
+		if pending_rows: problem.emit("Apply or discard your bonus edits first."); return
+		var script := row.duplicate()
+		script.script_field = "each turn"
+		reaction_requested.emit(script, {}, "Health & needs"))
+	body.add_child(reaction)
+	var help := Button.new()
+	help.text = "How do I connect this to my story?"
+	help.toggle_mode = true
+	body.add_child(help)
+	var guidance := AuthoringLayout.label("1. Choose attribute changes and Apply entries.\n2. In a story or item, choose Add action → Temporary conditions. Select this condition and its duration.\n3. Use Add condition → Temporary conditions to unlock a response while it is active.\n\nApplying again extends the duration without stacking bonuses. Creating a condition alone does not start it.\n\nTemporary flat HP bonuses are not supported. Restore health adds HP up to the current maximum; restored health is retained when the condition expires. Stamina changes health using the game’s rules.", 14, true)
+	guidance.hide()
+	body.add_child(guidance)
+	help.toggled.connect(func(open: bool) -> void: guidance.visible = open)
 
 func _add_property_catalog(schema: Dictionary) -> void:
 	property_entries.clear()
@@ -231,6 +262,10 @@ func _add_property_catalog(schema: Dictionary) -> void:
 	elif row.def.type == "item" and property_key in ["use", "infectious", "consumed", "in combat"]:
 		var open := AuthoringLayout.choice("Open Use & reactions", "See the use story, effects and food mutation together.")
 		open.pressed.connect(go_to_section.bind("use"))
+		body.add_child(open)
+	elif row.def.type == "condition" and property_key == "while active":
+		var open := AuthoringLayout.choice("Open Temporary bonuses", "Choose attributes and see how to apply this condition.")
+		open.pressed.connect(go_to_section.bind("bonuses"))
 		body.add_child(open)
 	else: _add_field(property_key, schema[property_key])
 
@@ -291,7 +326,7 @@ func _add_item_use() -> void:
 	options.toggled.connect(func(open: bool) -> void:
 		item_options_open = open
 		for control: Control in settings: control.visible = open)
-	_event_note("New reactions go at the end, before a final story link. Branches or early returns can skip later reactions; inspect them on the story board.")
+	_event_note("New reactions go before the first set of player responses or final story link. Branches or early returns can skip later reactions; inspect them on the story board.")
 	if not activity.is_empty(): _add_field("use action", "text")
 
 func _add_item_steps(nodes: Array, depth: int = 0) -> void:
@@ -391,8 +426,11 @@ func _build_summary() -> void:
 		for node: Dictionary in StoryGraph.script_nodes(_item_script()):
 			if node.kind == "effect": actions += 1
 		sheet.add_child(AuthoringLayout.label("%d direct use reactions" % actions, 14, true))
-	var count := StoryGraph.choices(row).size()
-	sheet.add_child(AuthoringLayout.label("%d player responses" % count, 14, true))
+	if row.def.type == "condition":
+		sheet.add_child(AuthoringLayout.label("Apply from a story or item. Set duration there.", 14))
+	if row.def.type != "condition":
+		var count := StoryGraph.choices(row).size()
+		sheet.add_child(AuthoringLayout.label("%d player responses" % count, 14, true))
 	sheet.add_child(AuthoringLayout.label("Unsaved changes" if row.doc.dirty() else "Saved", 13, true))
 	sheet.add_child(AuthoringLayout.label("Use Save all to keep your changes.", 13, true))
 
@@ -401,7 +439,7 @@ func _add_story_cards(schema: Dictionary) -> void:
 		var button := AuthoringLayout.choice("Open story board", "Write passages, add responses and connect the next story.")
 		button.pressed.connect(func() -> void: story_requested.emit(row, "@body"))
 		body.add_child(button)
-	var descriptions := {"play": "What happens during this event", "talk": "Conversation and player responses", "description": "What the player sees", "enter": "When the player enters this place", "presence": "While the player is here", "actions": "Things the player can choose to do", "use": "When the player uses this item", "observe": "Things the player can examine"}
+	var descriptions := {"ends": "When this condition expires; its bonuses have already been removed", "each turn": "While active, on each turn before the final expiry turn", "enters": "When a meter enters this condition’s stage (not ordinary timed application)", "still": "When a meter remains in this stage", "play": "What happens during this event", "talk": "Conversation and player responses", "description": "What the player sees", "enter": "When the player enters this place", "presence": "While the player is here", "actions": "Things the player can choose to do", "use": "When the player uses this item", "observe": "Things the player can examine"}
 	var titles := {"play": "Event story", "talk": "Conversation", "enter": "On entering", "presence": "While here", "actions": "Player actions", "use": "Use this item", "observe": "Examine surroundings"}
 	var search := LineEdit.new()
 	search.placeholder_text = "Find an interaction…"
@@ -427,6 +465,7 @@ func _add_story_cards(schema: Dictionary) -> void:
 		for card: Control in choices.get_children(): card.visible = text.to_lower() in str(card.get_meta("search")))
 
 func _event_note(text: String) -> void:
+	if text.is_empty(): return
 	var label := Label.new()
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -717,11 +756,15 @@ func _clear_event_requirement(current: Dictionary) -> bool:
 	return true
 
 func _add_rows(key: String, kind: String) -> void:
+	if key == "while active" and row.def.type == "condition": kind = "bonuses"
 	var d: FscParser.Definition = row.def
 	var doc: PackDocument = row.doc
 	var field: FscParser.Field = d.fields.get(key)
 	var entries: Array[Dictionary] = []
 	if field != null:
+		if kind == "bonuses" and not field.value.is_empty():
+			_event_note("This section has inline rules and is preserved unchanged.")
+			return
 		if _field_has_comments(doc, field):
 			var note := Label.new()
 			note.text = "This section contains author notes and is preserved."
@@ -736,11 +779,14 @@ func _add_rows(key: String, kind: String) -> void:
 				body.add_child(note)
 				return
 			var separator := child.text.find(":")
-			if separator < 0 and kind != "stages":
+			if separator < 0 and kind not in ["stages", "bonuses"]:
 				var note := Label.new()
 				note.text = "This section contains additional rules and is preserved."
 				body.add_child(note)
 				return
+			if kind == "bonuses":
+				entries.append({"name": "", "value": child.text})
+				continue
 			entries.append({"name": child.text.left(separator).strip_edges() if separator >= 0 else child.text, "value": child.text.substr(separator + 1).strip_edges() if separator >= 0 else ""})
 	if kind == "values":
 		_event_note("These values belong to %s. Flags remember yes/no; numbers count; states track progress. Stories can check and change them after you apply. Changing a name can break existing stories and saves." % d.id)
@@ -750,14 +796,14 @@ func _add_rows(key: String, kind: String) -> void:
 	var error_label := AuthoringLayout.label("", 14)
 	error_label.theme_type_variation = "ErrorLabel"
 	error_label.hide()
-	(layout.sheet if kind == "values" else body).add_child(error_label)
+	(layout.sheet if kind in ["values", "bonuses"] else body).add_child(error_label)
 	list.set_meta("error_label", error_label)
 	for entry: Dictionary in entries:
 		_add_row_controls(list, entry.name, entry.value, doc.writable, kind, key)
 	if doc.writable:
-		var buttons: BoxContainer = VBoxContainer.new() if kind == "values" else HBoxContainer.new()
+		var buttons: BoxContainer = VBoxContainer.new() if kind in ["values", "bonuses"] else HBoxContainer.new()
 		var add := Button.new()
-		add.text = "+ Add entry"
+		add.text = "+ Add bonus" if kind == "bonuses" else "+ Add entry"
 		add.pressed.connect(func() -> void:
 			_add_row_controls(list, "", "", true, kind, key)
 			_mark_rows(key))
@@ -773,9 +819,20 @@ func _add_rows(key: String, kind: String) -> void:
 			pending_rows = not pending_sections.is_empty()
 			_refresh())
 		buttons.add_child(discard)
-		(layout.sheet if kind == "values" else body).add_child(buttons)
+		(layout.sheet if kind in ["values", "bonuses"] else body).add_child(buttons)
 
 func _add_row_controls(parent: VBoxContainer, name: String, value: String, writable: bool, kind: String, section: String) -> void:
+	if kind == "bonuses":
+		var entry := AttributeBonusRow.new()
+		entry.configure(value, writable)
+		entry.edited.connect(_mark_rows.bind(section))
+		if writable:
+			var remove := Button.new()
+			remove.text = "Remove"
+			remove.pressed.connect(func() -> void: _mark_rows(section); entry.queue_free())
+			entry.add_child(remove)
+		parent.add_child(entry)
+		return
 	if kind == "values":
 		var entry := SavedValueRow.new()
 		entry.configure(name, value, writable)
@@ -842,6 +899,13 @@ func _save_rows(key: String, kind: String, list: VBoxContainer) -> void:
 	var names := {}
 	for child: Node in list.get_children():
 		if child.is_queued_for_deletion():
+			continue
+		if kind == "bonuses":
+			var bonus := (child as AttributeBonusRow).declaration()
+			if bonus.has("error"):
+				_rows_error(list, bonus.error)
+				return
+			lines.append(bonus.spec)
 			continue
 		var name := (child.get_child(0) as LineEdit).text.strip_edges()
 		var value := ""

@@ -6,6 +6,8 @@ Standalone Godot 4.7 desktop authoring tool for MAGE packs. `src/workspace.gd` m
 
 `src/authoring_layout.gd` supplies the shared section navigation, focused page and persistent summary used by Details, creation and action choosers. Keep incomplete structured entries on their page until applied; new interaction drafts create source only when applied. Response-linked story creation must preserve the originating script field and refuse a stale source snapshot.
 
+`src/attribute_bonus_row.gd` uses the shared effect compiler for reversible condition bonuses. Only the six player attributes support relative temporary changes; preserve other effects and explain repeated healing separately. Story image controls use existing `show` steps and runtime pack/extension precedence. New story-wide effects go before the first direct response group; nested branches and existing actions retain their positions.
+
 `src/saved_value_row.gd` supplies guided saved-value declarations, using the selected engine loader to read existing kinds and numeric limits. Preserve unedited declaration spelling and protect nested metadata. Structured entry drafts have inline errors, stale-source checks and an explicit discard action.
 
 `src/authoring_catalog.gd` adds author-facing labels, categories and help over the shared schema and effect compiler. Properties must include existing fields and script interactions. Item use controls distinguish food infection from scripted mutation and prevent mixing a use story with a built-in activity. Selecting food mutation alone creates an empty use program so the item is usable.

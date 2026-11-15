@@ -4,6 +4,7 @@ extends VBoxContainer
 
 signal changed(row: Dictionary)
 signal problem(message: String)
+signal details_requested(row: Dictionary)
 signal new_story_requested
 signal next_story_requested(row: Dictionary, option: Dictionary)
 
@@ -16,9 +17,14 @@ var graph_continuations: Dictionary = {}
 var positions: Dictionary = {}
 var layout_target := ""
 var focused_script: Dictionary = {}
+var focused_definition: Dictionary = {}
 var focused_id := ""
 var show_everything := false
+var focus_only := false
 var scope_button: Button
+var context_label: Label
+var context_row: Dictionary = {}
+var picker_image: TextureRect
 var picker: ConfirmationDialog
 var picker_search: LineEdit
 var picker_layout: AuthoringLayout
@@ -73,6 +79,15 @@ func _ready() -> void:
 		scope_button.text = "Show related stories" if show_everything else "Show all stories"
 		refresh())
 	toolbar.add_child(scope_button)
+	var focused := CheckButton.new()
+	focused.text = "Focus only"
+	focused.toggled.connect(func(enabled: bool) -> void:
+		focus_only = enabled
+		scope_button.disabled = enabled
+		refresh())
+	toolbar.add_child(focused)
+	context_label = AuthoringLayout.label("Choose a story to start writing.", 14, true)
+	add_child(context_label)
 	var help := Label.new()
 	help.text = "Write in the bubbles. Drag a response's dot to another story. Right-click a connection to disconnect it."
 	help.add_theme_font_size_override("font_size", 12)
@@ -100,6 +115,8 @@ func configure(value: PackWorkspace) -> void:
 func refresh() -> void:
 	if workspace == null or graph == null:
 		return
+	context_row = _fresh_row(focused_script) if not focused_script.is_empty() else (_fresh_row(focused_definition) if not focused_definition.is_empty() else {})
+	context_label.text = "All loaded stories" if show_everything and not focus_only else ("Choose a story to start writing." if context_row.is_empty() else "%s › %s › %s" % [context_row.pack, EventTriggers.title_for(workspace, context_row.def.type, context_row.def.id), str(context_row.get("script_field", "Story")).capitalize()])
 	graph.clear_connections()
 	for child: Node in graph.get_children():
 		if child is GraphNode:
@@ -115,7 +132,7 @@ func refresh() -> void:
 		var focused := _fresh_row(focused_script)
 		if not focused.is_empty():
 			visible_rows.push_front(focused)
-	if not show_everything and not focused_id.is_empty():
+	if not show_everything and not focus_only and not focused_id.is_empty():
 		var relevant := {focused_id: true}
 		var prefix := focused_id.get_slice(".", 0)
 		for candidate: Dictionary in workspace.rows:
@@ -128,6 +145,9 @@ func refresh() -> void:
 					relevant[link.from.def.id] = true
 					relevant[link.target] = true
 		visible_rows = visible_rows.filter(func(candidate: Dictionary) -> bool: return relevant.has(candidate.def.id))
+	if focus_only and not context_row.is_empty():
+		visible_rows = [context_row]
+	context_label.text += " · " + ("This interaction only" if focus_only else ("All packs" if show_everything else "Related stories · links up to two steps away"))
 	var y_offsets := [60.0, 60.0, 60.0]
 	var index := 0
 	for row: Dictionary in visible_rows:
@@ -151,6 +171,7 @@ func refresh() -> void:
 		graph_options[card.name] = options
 		y_offsets[column] += maxf(250.0, card.get_combined_minimum_size().y + 100.0)
 		index += 1
+	context_label.text += " · %d cards" % graph_rows.size()
 	for from_name: StringName in graph_rows:
 		var row: Dictionary = graph_rows[from_name]
 		var options: Array = graph_options[from_name]
@@ -207,6 +228,15 @@ func _build_card(card: GraphNode, row: Dictionary) -> void:
 	info.text = d.type.capitalize() + " · " + str(row.pack) + (" · reference" if not writable else "")
 	info.add_theme_font_size_override("font_size", 12)
 	card.add_child(info)
+	var open_details := Button.new()
+	open_details.text = "Content details & interactions"
+	open_details.pressed.connect(func() -> void: details_requested.emit(row))
+	card.add_child(open_details)
+	var image_button := Button.new()
+	image_button.text = "Choose opening image…"
+	image_button.disabled = not writable or (row.has("script_field") and ContentDB.SCHEMA.get(d.type, {}).get(row.script_field, "") == "menu")
+	image_button.pressed.connect(_open_image_picker.bind(row, {}))
+	card.add_child(image_button)
 	card.set_slot(0, d.type in ["scene", "menu"], 0, Color("d6a86b"), false, 0, Color.WHITE)
 	var speech_count := 0
 	var calls: Array = []
@@ -226,7 +256,7 @@ func _build_card(card: GraphNode, row: Dictionary) -> void:
 				if not target.is_empty():
 					calls.append(passage)
 			"show":
-				_add_note(card, "▧  Show image: " + str(passage.image))
+				_add_image_controls(card, row, passage)
 			"if", "fight":
 				var branch := VBoxContainer.new()
 				_add_branch_preview(branch, row, passage)
@@ -604,6 +634,7 @@ func _fresh_row(row: Dictionary) -> Dictionary:
 func focus_definition(row: Dictionary) -> void:
 	_load_layout()
 	focused_script.clear()
+	focused_definition = row.duplicate()
 	focused_id = str(row.def.id) if not row.is_empty() else ""
 	show_everything = false
 	if scope_button != null:
@@ -813,6 +844,12 @@ func _build_picker() -> void:
 	picker_list.item_activated.connect(func(_index: int) -> void: _apply_picker())
 	picker_layout.page.add_child(picker_list)
 	picker_layout.sheet.add_child(AuthoringLayout.label("YOUR SELECTION", 13, true))
+	picker_image = TextureRect.new()
+	picker_image.custom_minimum_size.y = 120
+	picker_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picker_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picker_layout.sheet.add_child(picker_image)
+	picker_image.hide()
 	picker_preview = AuthoringLayout.label("Choose an entry to see what it does.", 17)
 	picker_layout.sheet.add_child(picker_preview)
 	picker_amount_label = AuthoringLayout.label("Amount", 14, true)
@@ -847,11 +884,14 @@ func _open_existing_effect(row: Dictionary, option: Dictionary, action: Dictiona
 	if not amount.is_empty() and (amount.size() != 1 or amount.get("value", {}).get("op", "") != "num" or float(amount.get("value", {}).get("v", 0)) < 1 or float(amount.get("value", {}).get("v", 0)) > picker_amount.max_value):
 		picker_preview.text = "Current: " + AuthoringCatalog.effect_label(str(action.text)) + "\n\nChoose a replacement to change this action."
 		return
+	if original.get("op", "") == "condition" and (int(original.turns) < 1 or int(original.turns) > picker_amount.max_value):
+		picker_preview.text = "This duration is outside the guided range. Choose a replacement, or cancel to preserve it."
+		return
 	var identity := original.duplicate()
-	for key: String in ["quiet", "amount", "times"]: identity.erase(key)
+	for key: String in ["quiet", "amount", "times", "turns"]: identity.erase(key)
 	for entry: Dictionary in picker_entries:
 		var candidate := Effect.compile(str(entry.value)).duplicate()
-		for key: String in ["quiet", "amount", "times"]: candidate.erase(key)
+		for key: String in ["quiet", "amount", "times", "turns"]: candidate.erase(key)
 		if candidate != identity: continue
 		picker_category = str(entry.category)
 		picker_layout.set_sections(picker_categories, picker_category)
@@ -861,7 +901,8 @@ func _open_existing_effect(row: Dictionary, option: Dictionary, action: Dictiona
 			picker_list.select(index)
 			picker_list.ensure_current_is_visible()
 			_preview_picker(index)
-			if not amount.is_empty(): picker_amount.value = float(amount.value.v)
+			if original.get("op", "") == "condition": picker_amount.value = int(original.turns)
+			elif not amount.is_empty(): picker_amount.value = float(amount.value.v)
 			return
 	picker_preview.text = "Current: " + AuthoringCatalog.effect_label(str(action.text)) + "\n\nSpecialized controls for this action are not available yet. Choose a supported replacement, or cancel to keep it."
 
@@ -875,6 +916,36 @@ func _open_picker(row: Dictionary, option: Dictionary, mode: String, initial_cat
 	picker_mode = mode
 	picker.title = "Choose a condition" if mode in ["condition", "branch_condition", "passage_condition", "event_condition"] else ("Choose the next story" if mode == "destination" else ("Choose a story to play" if mode == "play" else "Choose an action"))
 	picker_entries.clear()
+	if mode == "image":
+		picker.title = "Choose a story image"
+		var seen := {}
+		# Match the runtime's first pack / extension precedence for image IDs.
+		for pack: Dictionary in workspace.preview_content().packs:
+			var folder: String = str(pack.path).path_join("images")
+			if not DirAccess.dir_exists_absolute(folder): continue
+			var ids: Array[String] = []
+			for file: String in DirAccess.get_files_at(folder):
+				if file.get_extension() in ["png", "jpg", "jpeg", "webp"] and file.get_basename() not in ids: ids.append(file.get_basename())
+			for id: String in ids:
+				if seen.has(id): continue
+				for extension: String in ["png", "jpg", "jpeg", "webp"]:
+					var path := folder.path_join(id + "." + extension)
+					if not FileAccess.file_exists(path): continue
+					seen[id] = true
+					var artist := workspace.preview_content().typed_value("image", id, "artist")
+					picker_entries.append({"label": id.capitalize() + " · " + str(pack.id), "value": id, "image_path": path, "category": "Images", "help": "Artist: " + (artist if not artist.is_empty() else "No credit entry yet") + "\nChoose Pack → Import image to add your own artwork.", "pack": pack.id, "root": pack.path})
+					break
+	if mode == "effect" or _condition_mode():
+		for id: String in workspace.preview_content().all_of("condition"):
+			var definition := workspace.preview_content().get_def("condition", id)
+			var name := workspace.preview_content().typed_value("condition", id, "name", id)
+			var owner := workspace.owner(definition.path)
+			var pack: String = workspace.manifest(owner).get("id", "")
+			if mode == "effect":
+				picker_entries.append({"label": "Apply " + name, "value": "condition " + id + " for 1 turns", "template": "condition " + id + " for {amount} turns", "amount_label": "Duration in turns", "default_amount": 2, "category": "Temporary conditions", "help": "Apply the bonuses once; remove them when the duration ends. Applying again extends the duration without stacking bonuses. Configure bonuses in the condition’s Details → Temporary bonuses.", "pack": pack, "root": owner})
+			else:
+				for has: bool in [true, false]:
+					picker_entries.append({"label": name + (" is active" if has else " is not active"), "value": "player " + ("has" if has else "does not have") + " condition " + id, "category": "Temporary conditions", "help": "Check whether this timed condition or meter stage is active.", "pack": pack, "root": owner})
 	if mode == "effect":
 		for reaction: Dictionary in AuthoringCatalog.basic_reactions():
 			reaction.pack = ""
@@ -902,7 +973,7 @@ func _open_picker(row: Dictionary, option: Dictionary, mode: String, initial_cat
 			picker_entries.append({"label": "Attempt mutation toward " + name, "value": "infect " + id, "template": "infect " + id + " {amount} times", "amount_label": "Mutation attempts", "category": "Body changes", "help": "Attempt gradual mutation; infection rules and resistance apply. To respect food-infection protections, use the item's Food mutation setting.", "pack": entry.pack, "root": entry.root})
 			picker_entries.append({"label": "Transform fully into " + name, "value": "transform into " + id, "category": "Body changes", "help": "Transform every defined part at once, bypassing gradual-infection blocking and resistance.", "pack": entry.pack, "root": entry.root})
 	for entry: Dictionary in workspace.rows:
-		if mode in ["play", "destination"] or entry.def.type != "item" or entry.def.mode != "define":
+		if mode in ["play", "destination", "image"] or entry.def.type != "item" or entry.def.mode != "define":
 			continue
 		var id: String = entry.def.id
 		var display: String = entry.def.fields["name"].value if entry.def.fields.has("name") else id
@@ -912,7 +983,7 @@ func _open_picker(row: Dictionary, option: Dictionary, mode: String, initial_cat
 		else:
 			picker_entries.append({"label": "Give " + display, "value": "give " + id, "pack": entry.pack, "root": entry.root})
 			picker_entries.append({"label": "Take " + display, "value": "take " + id, "pack": entry.pack, "root": entry.root})
-	if mode not in ["play", "destination"]:
+	if mode not in ["play", "destination", "image"]:
 		var content := workspace.preview_content()
 		var keys: Array = content.values.keys()
 		keys.sort()
@@ -956,14 +1027,16 @@ func _open_picker(row: Dictionary, option: Dictionary, mode: String, initial_cat
 	for entry: Dictionary in picker_entries:
 		entry.category = entry.get("category", _entry_category(entry))
 		available[entry.category] = true
-	for category: String in ["Health & needs", "Body changes", "Attributes", "Items", "Story progress", "Saved values", "Time & movement", "Stories"]:
+	for category: String in ["Images", "Temporary conditions", "Health & needs", "Body changes", "Attributes", "Items", "Story progress", "Saved values", "Time & movement", "Stories"]:
 		if available.has(category): picker_categories.append({"key": category, "title": category})
 	if not available.has(picker_category): picker_category = "All"
 	picker_layout.set_sections(picker_categories, picker_category)
 	picker_layout.page.get_child(0).text = picker.title
 	picker.ok_button_text = "Use condition" if _condition_mode() else ("Connect selected story" if mode == "destination" else ("Play selected story" if mode == "play" else "Add action"))
+	if mode == "image": picker.ok_button_text = "Use image"
 	picker_new_story.visible = mode == "destination"
 	picker_error.text = ""
+	picker_search.placeholder_text = "Search artwork by name or pack…" if mode == "image" else "Search what you want to happen…"
 	picker_search.text = ""
 	_filter_picker()
 	picker.popup_centered_clamped(Vector2i(790, 550), 0.9)
@@ -993,6 +1066,8 @@ func _filter_picker() -> void:
 	picker_preview.text = "No matching choices. Try another category or search." if picker_list.item_count == 0 else "Choose an entry to see what it does."
 	picker_amount.hide()
 	picker_amount_label.hide()
+	picker_image.hide()
+	if picker_mode == "image" and picker_list.item_count == 0: picker_preview.text = "No matching artwork. Choose Pack → Import image, then reopen this chooser."
 
 func _preview_picker(_index: int) -> void:
 	picker_error.text = ""
@@ -1026,12 +1101,24 @@ func _picker_entry() -> Dictionary:
 func _update_picker_preview() -> void:
 	var entry := _picker_entry()
 	if entry.is_empty(): return
-	var context := "Applies to this story."
-	if picker_row.def.type == "item" and picker_row.get("script_field", "") == "use":
-		context = "When the player uses this item. Added at the end of the use story, before a final story link." if picker_action.is_empty() else "When the use story reaches this reaction. Its position and surrounding conditions stay the same."
-	if not picker_option.is_empty(): context = "After the player chooses: “" + str(picker_option.label) + "”"
-	elif picker_mode == "event_condition": context = "This event can run only when this requirement passes."
+	var context := "Runs before the first set of player responses or final story link, after preceding steps. Earlier branches can skip it."
+	if not picker_action.is_empty(): context = "Replaces this action at the same point, keeping its surrounding conditions."
+	if picker_mode == "play": context = "Plays another story and returns here. Added before the final story link, after existing steps."
+	if picker_mode == "destination": context = "Continues to the selected story after this response."
+	picker_image.hide()
+	if picker_mode == "image":
+		var picture := Image.load_from_file(str(entry.image_path))
+		if picture != null:
+			picker_image.texture = ImageTexture.create_from_image(picture)
+			picker_image.show()
+		context = "Shown at the beginning of this interaction, before its text and choices." if picker_passage.is_empty() else "Replaces this image at the same point in the story."
+	if picker_mode != "image" and picker_row.def.type == "item" and picker_row.get("script_field", "") == "use":
+		context = "When the player uses this item. Added before the first set of player responses or final story link." if picker_action.is_empty() else "When the use story reaches this reaction. Its position and surrounding conditions stay the same."
+	if picker_mode != "image" and picker_row.def.type == "condition" and picker_row.get("script_field", "") == "each turn":
+		context = "Runs on each active turn before the expiry turn. This is a repeated action; it is not reversed when the condition ends."
+	if picker_mode == "event_condition": context = "This event can run only when this requirement passes."
 	elif _condition_mode(): context = "This controls when this choice or passage is available."
+	elif not picker_option.is_empty(): context = "After the player chooses: “" + str(picker_option.label) + "”"
 	picker_preview.text = str(entry.label) + ("\n" + picker_amount_label.text + ": %d" % int(picker_amount.value) if picker_amount.visible else "") + "\n\n" + str(entry.get("help", "")) + "\n\n" + context
 
 func _apply_picker() -> void:
@@ -1053,7 +1140,9 @@ func _apply_picker() -> void:
 	var manifest: PackDocument = workspace.documents[workspace.target.path_join("pack.fsc")]
 	var manifest_before := manifest.text
 	var error := ""
-	if picker_mode == "event_condition":
+	if picker_mode == "image":
+		error = StoryGraph.set_image(current, picker_passage, entry.value)
+	elif picker_mode == "event_condition":
 		var previous: String = current.doc.field_value(current.def, "requires")
 		# Preserve both requirements when adding another condition.
 		var condition: String = entry.value if previous.is_empty() else "(" + previous + ") and (" + str(entry.value) + ")"
@@ -1106,6 +1195,7 @@ static func _condition_label(condition: Dictionary) -> String:
 		"and": return _condition_label(condition.a) + " and " + _condition_label(condition.b)
 		"or": return _condition_label(condition.a) + " or " + _condition_label(condition.b)
 		"not": return "not " + _condition_label(condition.a)
+		"has_condition": return str(condition.id).capitalize() + (" is not active" if condition.get("neg", false) else " is active")
 		"truthy": return str(condition.get("path", "a flag")) + " is set"
 		"has_item": return str(condition.get("who", "player")) + (" does not have " if condition.get("neg", false) else " has ") + str(condition.get("item", "an item"))
 		"quest": return str(condition.get("quest", "Quest")) + " " + str(condition.get("rel", "is")) + " " + str(condition.get("stage", ""))
@@ -1212,3 +1302,25 @@ func _open_passage_picker(row: Dictionary, passage: Dictionary) -> void:
 	_open_picker(row, {}, "passage_condition")
 	picker_passage = passage
 	picker.title = "When should this text appear?"
+
+func _open_image_picker(row: Dictionary, node: Dictionary) -> void:
+	_open_picker(row, {}, "image")
+	picker_passage = node
+
+func _add_image_controls(parent: Node, row: Dictionary, node: Dictionary) -> void:
+	var controls := HBoxContainer.new()
+	var change := Button.new()
+	change.text = "Image: " + str(node.image).capitalize()
+	change.clip_text = true
+	change.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	change.disabled = not row.doc.writable
+	change.pressed.connect(_open_image_picker.bind(row, node))
+	controls.add_child(change)
+	var remove := Button.new()
+	remove.text = "Remove"
+	remove.disabled = not row.doc.writable
+	remove.pressed.connect(func() -> void:
+		var current := _fresh_row(row)
+		if not current.is_empty(): _finish(current, StoryGraph.set_image(current, node, "")))
+	controls.add_child(remove)
+	parent.add_child(controls)

@@ -3,6 +3,7 @@ extends RefCounted
 ## Author-facing guidance over the shared schema and effect compiler.
 
 const HELP := {
+	"while active": ["Temporary bonuses", "Attribute changes that last while a condition is active, then reverse automatically.", "Story rules"],
 	"name": ["Name", "The name players see.", "Basics"],
 	"description": ["Description", "What players see when examining this content.", "Basics"],
 	"image": ["Picture", "Choose artwork from the loaded packs.", "Basics"],

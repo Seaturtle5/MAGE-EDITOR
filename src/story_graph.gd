@@ -22,6 +22,42 @@ static func script_nodes(row: Dictionary) -> Array:
 		nodes.append_array(FscParser.parse_script(field.children, FscParser.Result.new()))
 	return nodes
 
+static func set_image(row: Dictionary, node: Dictionary, image: String) -> String:
+	if not row.doc.writable: return "This pack is read-only."
+	if not image.is_empty() and RegEx.create_from_string("^[a-z0-9_][a-z0-9_.-]*$").search(image) == null:
+		return "Choose an image with a lowercase content ID."
+	var lines := _lines(row.doc)
+	if not node.is_empty():
+		var index := int(node.line) - 1
+		if index < 0 or index >= lines.size() or lines[index].strip_edges() != "show " + str(node.image):
+			return "This image step changed. Reopen it before editing."
+		if image.is_empty(): lines.remove_at(index)
+		else: _replace_line(lines, index, _indent(lines[index]) + "show " + image)
+		_save_lines(row.doc, lines)
+		return ""
+	if image.is_empty(): return ""
+	var nodes := script_nodes(row)
+	if not nodes.is_empty() and nodes[0].kind == "show":
+		return set_image(row, nodes[0], image)
+	if row.def.type == "item" and row.get("script_field", "") == "use" and row.def.fields.has("use action"):
+		return "Remove the built-in use activity before adding a story image."
+	if not nodes.is_empty() and not nodes[0].has("inline_field"):
+		var index := int(nodes[0].line) - 1
+		_insert_line(row.doc, lines, index, _indent(lines[index]) + "show " + image)
+		_save_lines(row.doc, lines)
+		return ""
+	if row.def.type == "scene" and not row.has("script_field"):
+		var eol := "\r\n" if "\r\n" in row.doc.text else "\n"
+		row.doc.replace_block(row.def, row.doc.block(row.def) + eol + "show " + image)
+		return ""
+	var field: String = row.get("script_field", "intro" if row.def.type == "menu" else ("play" if row.def.type == "event" else "talk"))
+	if ContentDB.SCHEMA.get(row.def.type, {}).get(field, "") != "script":
+		return "Open a story passage to choose its image."
+	if row.def.fields.has(field) and not row.def.fields[field].value.is_empty() and not row.def.fields[field].children.is_empty():
+		return "This passage mixes inline text and nested steps; its source is preserved."
+	var text: String = row.doc.field_value(row.def, field)
+	return row.doc.set_field(row.def, field, "show " + image + ("\n" + text if not text.is_empty() else ""), true)
+
 static func speech(row: Dictionary) -> Dictionary:
 	for node: Dictionary in script_nodes(row):
 		if node.kind == "text" and not str(node.text).is_empty():
@@ -594,6 +630,14 @@ static func add_primary_effect(row: Dictionary, effect: String) -> String:
 		return "This action is not supported by the engine."
 	if d.type == "item" and row.get("script_field", "") == "use" and d.fields.has("use action"):
 		return "This item starts a built-in activity. Remove that activity in Use & reactions before adding reactions."
+	# A story-level action must run before the player chooses a response.
+	for node: Dictionary in script_nodes(row):
+		if node.kind != "choices": continue
+		var lines := _lines(doc)
+		var at := int(node.line) - 1
+		_insert_line(doc, lines, at, _indent(lines[at]) + "~ " + effect)
+		_save_lines(doc, lines)
+		return ""
 	var direct := primary_transition(row)
 	if not direct.is_empty():
 		if direct.has("inline_field"):

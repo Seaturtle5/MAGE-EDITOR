@@ -983,6 +983,7 @@ func _set_new_type(type: String) -> void:
 		"item": "Create an object the player can find or use.",
 		"location": "Create a place the player can visit.",
 		"quest": "Track the stages of an ongoing story.",
+		"condition": "Create temporary attribute bonuses, then apply them from a story or item for a chosen number of turns.",
 		"values": "Create flags and values to remember story progress."
 	}
 	new_help.text = descriptions.get(type, "Create content in your working pack.")
@@ -1144,6 +1145,11 @@ func _build_graph_tab() -> void:
 	story_canvas.name = "Story board"
 	tabs.add_child(story_canvas)
 	story_canvas.configure(workspace)
+	story_canvas.details_requested.connect(func(row: Dictionary) -> void:
+		if not _entries_ready(): return
+		selected = row
+		_refresh_selection()
+		tabs.current_tab = 4)
 	story_canvas.changed.connect(_on_canvas_changed)
 	story_canvas.problem.connect(_show_error)
 	story_canvas.new_story_requested.connect(_new_story_node)

@@ -37,10 +37,23 @@ The editor stages a copy of the selected engine's content library in a temporary
 | Add story steps | Use the buttons on a node to add speech, a response, an action, a pause, or a story to play and return from. Action and condition choosers have categories, search and a preview of their scope. Item and number changes have an amount control. Number conditions offer at least, at most and equal thresholds; time controls record a moment and check turns passed, and lists can be checked for entries. Unrecorded times count as long ago. Nothing is added until confirmed. |
 | Use another pack | **Pack → Add reference pack** loads its definitions read-only. **Show library** opens a searchable panel with pack filters, values and problems. Reference selectors and story actions can use other packs and add the dependency to your working pack. |
 | Create saved values | In **Details → Settings**, edit a values section with Flag, Number, Text, Time, States and List controls. Each explains its starting behavior; numbers have optional normal and fight limits. Apply entries before leaving, or choose **Discard entry edits**. Errors stay beside your draft. |
-| Add art | **Import image** copies an image into the working pack and adds an artist credit. |
+| Add art | **Import image** copies artwork and adds an artist credit. On a story card, **Choose opening image** previews and selects artwork from loaded packs. Click an existing image step to replace it, or **Remove** to delete that step. Images are optional. |
+| Focus on an interaction | The story board shows its pack, content, interaction and card count. **Focus only** hides neighboring stories; switch it off to reconnect them. **Content details & interactions** returns to the owning content. |
+| Add temporary bonuses | Create a **condition**, then open **Details → Temporary bonuses**. Add named attribute changes and apply them. From a story or item, **Add action → Temporary conditions** applies the condition for a chosen duration. Response conditions can check whether it is active. |
 | Check and save | **Check pack** checks the loaded packs, including unsaved changes, using the engine and opens the problems panel. **Save all** writes changed files in the working pack. |
 
 Imported images are copied immediately; content changes stay in memory until saved. Saving stops if a content file changed on disk since it was opened. Save operations across several files are not one transaction.
+
+## Example: warmth restores health for a while
+
+1. Create a **condition** named **Warmed up**.
+2. In **Temporary bonuses**, choose **+ Add repeated reaction → Restore health**, enter **5**, then **Add action**.
+3. Open an item's **Use & reactions**. Add a reaction under **Temporary conditions**, choose **Warmed up**, and set **Duration in turns** to **3**.
+4. Check the pack and save.
+
+This adds 5 HP on two active turns, up to maximum health. The third turn expires the condition without another healing action. Restored HP remains; applying the same condition again extends its duration. For a reversible attribute bonus, use **+ Add bonus** instead. Flat temporary HP bonuses are not supported by the current engine; stamina affects health through the game's own rules.
+
+New story-wide actions run before the first set of player responses or final story link, after preceding steps. Response actions run when that response is chosen. Earlier branches can skip later actions; the board preserves their order.
 
 ## Current limits
 
