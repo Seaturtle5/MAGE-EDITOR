@@ -31,6 +31,70 @@ static var _prose := RegEx.create_from_string(PROSE)
 static var _field := RegEx.create_from_string("^(\\s*)([a-z][a-z ]*?):(\\s+)(.*)$")
 static var _bracket := RegEx.create_from_string("\\[[^\\[\\]]*\\]")
 
+## Applies `change` to the words a player reads in a line, and returns the
+## line: story text, names and descriptions, a response's words. Actions,
+## conditions, IDs and anything in square brackets are left alone.
+static func map_prose(raw: String, change: Callable) -> String:
+	var clean := raw.strip_edges()
+	if clean.is_empty() or clean.begins_with("//") or clean.begins_with("=="): return raw
+	var from := 0
+	var to := raw.length()
+	if clean.begins_with("~ ask ") and ":" in raw: from = raw.find(":") + 1
+	elif clean.begins_with("~ ending reason "): from = raw.find("ending reason ") + 14
+	elif clean.begins_with("~") or clean.begins_with("->") or clean.begins_with("play ") or clean.begins_with("show ") or clean == "---" or (clean.begins_with("fight ") and clean.ends_with(":")) or ((clean.begins_with("if ") or clean.begins_with("else if ") or clean == "else:") and clean.ends_with(":")): return raw
+	elif clean.begins_with("* "): from = raw.find("*") + 1
+	else:
+		var named := _field.search(raw)
+		if named != null:
+			if _prose.search(named.get_string(2)) == null: return raw
+			from = named.get_start(4)
+		elif RegEx.create_from_string("^\\s*[a-z][a-z ]*:\\s*$").search(raw) != null: return raw
+	var result := raw.left(from)
+	var last := from
+	for marked: RegExMatch in _bracket.search_all(raw, from, to):
+		result += str(change.call(raw.substr(last, marked.get_start() - last))) + marked.get_string()
+		last = marked.get_end()
+	return result + str(change.call(raw.substr(last)))
+
+## Every line of story text in which `find` would be replaced:
+## [{doc, line, before, after, where, text}].
+static func replace_plan(workspace: PackWorkspace, find: String, replacement: String, whole_words: bool = false, match_case: bool = true) -> Array[Dictionary]:
+	var plan: Array[Dictionary] = []
+	if find.is_empty(): return plan
+	var escaped := ""
+	for character: String in find: escaped += ("\\" + character) if character in "\\^$.|?*+()[]{}" else character
+	var pattern := RegEx.create_from_string(("(?i)" if not match_case else "") + ("\\b" + escaped + "\\b" if whole_words else escaped))
+	var header := RegEx.create_from_string("^==\\s+(?:extend\\s+|replace\\s+)?[a-z_]+\\s+(\\S+)")
+	var paths: Array = workspace.documents.keys()
+	paths.sort()
+	for path: String in paths:
+		var doc: PackDocument = workspace.documents[path]
+		if not doc.writable: continue
+		var lines: PackedStringArray = doc.text.split("\n")
+		var owner := ""
+		for index in lines.size():
+			var raw := lines[index].trim_suffix("\r")
+			var head := header.search(raw)
+			if head != null: owner = Wording.readable(head.get_string(1))
+			var after := map_prose(raw, func(part: String) -> String: return pattern.sub(part, replacement.replace("\\", "\\\\").replace("$", "\\$"), true))
+			if after != raw: plan.append({"doc": doc, "line": index + 1, "before": raw.strip_edges(), "after": after.strip_edges(), "where": owner, "text": after + ("\r" if lines[index].ends_with("\r") else "")})
+	return plan
+
+## Applies the chosen lines of a replace plan as one undo step.
+static func replace(workspace: PackWorkspace, find: String, replacement: String, plan: Array) -> String:
+	if plan.is_empty(): return "Nothing to replace."
+	return workspace.transaction("Replace “%s” with “%s” in %d line%s" % [find, replacement, plan.size(), "" if plan.size() == 1 else "s"], func() -> String:
+		var changed: Dictionary = {}
+		for entry: Dictionary in plan:
+			var doc: PackDocument = entry.doc
+			if not changed.has(doc.path): changed[doc.path] = {"doc": doc, "lines": doc.text.split("\n")}
+			changed[doc.path].lines[int(entry.line) - 1] = entry.text
+		for path: String in changed:
+			changed[path].doc.change("\n".join(changed[path].lines))
+			var parsed := FscParser.parse(changed[path].doc.text, path)
+			if not parsed.ok(): return "The replacement would break “%s”: %s" % [path.get_file(), str(parsed.diagnostics[0].message)]
+		return "")
+
 ## The parts of a line where IDs are meant, joined: for finding uses.
 static func code_text(raw: String) -> String:
 	var parts: Array[String] = []

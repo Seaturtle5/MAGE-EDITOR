@@ -206,7 +206,7 @@ func _build_ui() -> void:
 	file_menu.flat = false
 	file_menu.tooltip_text = "Create or open a pack, add other packs to use their content, import pictures."
 	var popup := file_menu.get_popup()
-	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["History of changes…", 7], ["", -1], ["Delete the selected content…", 4]]:
+	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["History of changes…", 7], ["Find and replace in story text…      Ctrl+H", 8], ["", -1], ["Delete the selected content…", 4]]:
 		if entry[1] < 0: popup.add_separator()
 		else: popup.add_item(entry[0], entry[1])
 	popup.id_pressed.connect(_on_pack_menu)
@@ -505,6 +505,7 @@ func _on_pack_menu(id: int) -> void:
 		5: _validate()
 		6: _save_all()
 		7: _show_history()
+		8: actions.find_and_replace()
 
 func _set_side_panel(open: bool) -> void:
 	side_panel.visible = open
@@ -1948,7 +1949,12 @@ func _build_workflow() -> void:
 	actions.problem.connect(_show_error)
 	actions.open_line.connect(func(path: String, line: int) -> void: _open_line(path, line))
 	actions.changed.connect(func(row: Dictionary) -> void:
-		if row.is_empty(): return
+		if row.is_empty():
+			# A change across the pack, such as find and replace: stay where the author is.
+			if not selected.is_empty() and selected.has("def"): selected = workspace.find_row(selected.doc.path, selected.def.type, selected.def.id, selected.def.mode, selected.get("ordinal", 0))
+			_refresh_all()
+			_set_status(str(workspace.history.steps[workspace.history.cursor - 1].label) + ".", true)
+			return
 		_on_canvas_changed(row)
 		if tabs.current_tab != 3 or row.def.type not in ["scene", "menu", "character"]: _open_world_content(row))
 	actions.removed.connect(func() -> void:
@@ -2100,6 +2106,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event.ctrl_pressed or event.meta_pressed:
 		match event.keycode:
 			KEY_K: _find_anything()
+			KEY_H: actions.find_and_replace()
 			KEY_S: _save_all()
 			KEY_Z:
 				# Text controls retain their own draft undo until focus leaves.

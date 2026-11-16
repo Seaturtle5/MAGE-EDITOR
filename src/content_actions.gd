@@ -27,6 +27,13 @@ var delete_row: Dictionary = {}
 var quest_dialog: AcceptDialog
 var quest_body: VBoxContainer
 var quest_row: Dictionary = {}
+var replace_dialog: ConfirmationDialog
+var replace_find: LineEdit
+var replace_with: LineEdit
+var replace_words: CheckBox
+var replace_case: CheckBox
+var replace_list: Tree
+var replace_note: Label
 
 func _ready() -> void:
 	uses_dialog = AcceptDialog.new()
@@ -105,6 +112,84 @@ func _ready() -> void:
 	quest_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	quest_scroll.add_child(quest_body)
 	add_child(quest_dialog)
+
+## Find and replace in the words players read. IDs, actions and conditions are never touched.
+func find_and_replace() -> void:
+	if replace_dialog == null:
+		replace_dialog = ConfirmationDialog.new()
+		replace_dialog.title = "Find and replace in story text"
+		replace_dialog.ok_button_text = "Replace in the ticked lines"
+		replace_dialog.dialog_hide_on_ok = false
+		var body := VBoxContainer.new()
+		replace_dialog.add_child(body)
+		body.add_child(AuthoringLayout.label("Only the words players read are searched: story text, names, descriptions and responses. Actions, conditions and IDs stay as they are.", 13, true))
+		var grid := GridContainer.new()
+		grid.columns = 2
+		body.add_child(grid)
+		grid.add_child(AuthoringLayout.label("Find", 14))
+		replace_find = LineEdit.new()
+		replace_find.custom_minimum_size.x = 420
+		replace_find.text_changed.connect(func(_text: String) -> void: _refresh_replace())
+		grid.add_child(replace_find)
+		grid.add_child(AuthoringLayout.label("Replace with", 14))
+		replace_with = LineEdit.new()
+		replace_with.text_changed.connect(func(_text: String) -> void: _refresh_replace())
+		grid.add_child(replace_with)
+		var options := HBoxContainer.new()
+		body.add_child(options)
+		replace_words = CheckBox.new()
+		replace_words.text = "Whole words only"
+		replace_words.toggled.connect(func(_on: bool) -> void: _refresh_replace())
+		options.add_child(replace_words)
+		replace_case = CheckBox.new()
+		replace_case.text = "Match capital letters"
+		replace_case.button_pressed = true
+		replace_case.toggled.connect(func(_on: bool) -> void: _refresh_replace())
+		options.add_child(replace_case)
+		replace_note = AuthoringLayout.label("", 14)
+		body.add_child(replace_note)
+		replace_list = Tree.new()
+		replace_list.hide_root = true
+		replace_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		replace_list.item_activated.connect(func() -> void:
+			var entry: Variant = replace_list.get_selected().get_metadata(0) if replace_list.get_selected() != null else null
+			if entry is Dictionary:
+				replace_dialog.hide()
+				open_line.emit(entry.doc.path, int(entry.line)))
+		body.add_child(replace_list)
+		replace_dialog.confirmed.connect(func() -> void:
+			var chosen: Array = []
+			var item := replace_list.get_root().get_first_child() if replace_list.get_root() != null else null
+			while item != null:
+				if item.is_checked(0): chosen.append(item.get_metadata(0))
+				item = item.get_next()
+			var error := ContentTools.replace(workspace, replace_find.text, replace_with.text, chosen)
+			if not error.is_empty():
+				replace_note.text = error
+				replace_note.theme_type_variation = "ErrorLabel"
+				return
+			replace_dialog.hide()
+			changed.emit({}))
+		add_child(replace_dialog)
+	_refresh_replace()
+	AuthoringLayout.popup(replace_dialog, Vector2i(760, 540))
+	replace_find.grab_focus()
+
+func _refresh_replace() -> void:
+	replace_list.clear()
+	var root := replace_list.create_item()
+	var plan := ContentTools.replace_plan(workspace, replace_find.text, replace_with.text, replace_words.button_pressed, replace_case.button_pressed)
+	replace_note.theme_type_variation = "MutedLabel"
+	replace_note.text = "Write what to find." if replace_find.text.is_empty() else ("Found in %d line%s. Untick any line to leave it; double-click to open it." % [plan.size(), "" if plan.size() == 1 else "s"] if not plan.is_empty() else "Not found in the story text of your pack.")
+	replace_dialog.get_ok_button().disabled = plan.is_empty()
+	for index in mini(plan.size(), 500):
+		var entry: Dictionary = plan[index]
+		var item := replace_list.create_item(root)
+		item.set_cell_mode(0, TreeItem.CELL_MODE_CHECK)
+		item.set_checked(0, true)
+		item.set_editable(0, true)
+		item.set_text(0, "%s:   %s   →   %s" % [entry.where, entry.before, entry.after])
+		item.set_metadata(0, entry)
 
 static func use_label(use: Dictionary) -> String:
 	return "%s  %s   ·   %s" % [Wording.icon(use.row.def.type), Wording.title(use.row), str(use.text).trim_prefix("~ ")]
