@@ -588,11 +588,12 @@ func uses_index() -> Dictionary:
 			var clean := lines[index].strip_edges()
 			if clean.is_empty() or clean.begins_with("//"): continue
 			var seen: Dictionary = {}
-			for matched: RegExMatch in token.search_all(clean):
+			var code := ContentTools.code_text(lines[index].trim_suffix("\r"))
+			for matched: RegExMatch in token.search_all(code):
 				var id := matched.get_string()
 				if not known.has(id) or id == row.def.id or seen.has(id): continue
-				# "name: Wolf" names the content itself, not another one.
-				if matched.get_start() > 0 and clean[matched.get_start() - 1] == "." : continue
+				# In "adam.trust" only the owner is content; "trust" is its value.
+				if matched.get_start() > 0 and code[matched.get_start() - 1] == ".": continue
 				seen[id] = true
 				if not _uses.has(id): _uses[id] = []
 				_uses[id].append({"row": row, "line": int(row.def.line) + index, "text": clean})

@@ -1,10 +1,15 @@
 // title: Add a place
 // about: A new place on the map, connected to the others.
 // kind: location
+// order: 5
+// step: The place
 // question: name|Name|name|
-// question: description|Description|prose|A quiet place to explore.
+// question: description|What does the player see?|prose|A quiet place to explore.
+// question: area|Which area is it in? (optional)|zone?||An area decides what can be found and met while exploring here.
+// question: picture|Picture (optional)|image?|
 == location {{id}}
 name: {{name}}
-zone: none
+zone: {{area_or_none}}
+image: {{picture}}
 description:
     {{description}}

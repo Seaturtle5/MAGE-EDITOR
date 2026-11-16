@@ -1,6 +1,7 @@
 // title: A shopkeeper
 // about: A character who runs a shop.
 // kind: character
+// order: 15
 // question: name|Name|name|
 // question: place|Shop location|location|
 // question: item|First item to sell|item|

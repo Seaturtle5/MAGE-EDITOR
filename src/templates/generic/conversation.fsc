@@ -1,29 +1,24 @@
 // title: Talk to a character
 // about: Someone to meet, with a greeting and a few responses.
 // kind: character
-// question: name|Name|name|
+// order: 1
+// step: Who
+// question: name|Name|name||What players call this character.
 // question: pronouns|Pronouns|choice:they,she,he,it|they
-// question: place|Home place|location|
-// question: greeting|Greeting|prose|Hello, stranger.
-// question: response1|First response|prose|Ask about this place
-// question: reply1|First reply|prose|There is much to discover.
-// question: response2|Second response|prose|Ask about them
-// question: reply2|Second reply|prose|Perhaps we will get to know each other.
-// question: response3|Last response|prose|Say goodbye
+// question: place|Where do they live?|location||Choose a place, drag one here from the library, or make a new one.
+// question: picture|Portrait (optional)|image?|
+// step: Greeting
+// question: greeting|What do they say first?|prose|Hello, stranger.|The player reads this when the talk starts.
+// step: Responses
+// question: responses|What can the player say?|responses|Ask about this place=There is much to discover.=back;Ask about them=Perhaps we will get to know each other.=back;Say goodbye==end|Each response has a reply. Then the talk goes back to the list, or ends.
 == character {{id}}
 name: {{name}}
 pronouns: {{pronouns}}
 lives at: {{place}}
+image: {{picture}}
 values:
     met: flag
 talk:
     ~ {{id}}.met = true
     {{greeting}}
-    * {{response1}}
-        {{reply1}}
-        -> back
-    * {{response2}}
-        {{reply2}}
-        -> back
-    * {{response3}}
-        -> end
+    {{responses}}

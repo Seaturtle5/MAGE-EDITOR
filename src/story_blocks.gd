@@ -36,7 +36,7 @@ static func end_spot(row: Dictionary, entries: Array[Dictionary], parent: Dictio
 	if not kids.is_empty() and kids[0].node.has("inline_field"): return {"field": kids[0].node.inline_field, "inline": true}
 	if not kids.is_empty():
 		var last: Dictionary = kids[-1]
-		if last.node.kind == "choices": return {"line": last.line, "indent": last.indent}
+		if last.node.kind in ["choices", "goto"]: return {"line": last.line, "indent": last.indent}
 		return {"line": last.end_line, "indent": kids[0].indent}
 	if not parent.is_empty(): return {"line": int(parent.line) + 1, "indent": str(parent.indent) + "    "}
 	if row.def.type in ["scene", "text"] and not row.has("script_field"): return {"start": true}

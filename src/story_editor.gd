@@ -152,7 +152,7 @@ func _siblings(entry: Dictionary) -> Array[Dictionary]:
 func _render(parent_key: String, host: VBoxContainer, in_fight: bool) -> void:
 	var kids := StoryBlocks.children(entries, parent_key)
 	var parent := _entry(parent_key)
-	var closing: bool = not kids.is_empty() and kids[-1].node.kind == "choices"
+	var closing: bool = not kids.is_empty() and kids[-1].node.kind in ["choices", "goto"] and not kids[-1].node.has("inline_field")
 	for entry: Dictionary in kids:
 		if closing and is_same(entry, kids[-1]): _add_row(host, parent, in_fight)
 		_block(entry, host, in_fight)
@@ -891,10 +891,11 @@ func _focus_line(line: int) -> void:
 		if int(entry.line) <= line and line < maxi(int(entry.end_line), int(entry.line) + 1): best = panels[key]
 	if best == null: return
 	_reveal.call_deferred(best)
-	best.grab_focus.call_deferred()
 
 func _reveal(control: Control) -> void:
-	if is_instance_valid(control) and block_scroll.is_ancestor_of(control): block_scroll.ensure_control_visible(control)
+	if not is_instance_valid(control) or not control.is_inside_tree() or not block_scroll.is_ancestor_of(control): return
+	block_scroll.ensure_control_visible(control)
+	if control.focus_mode != Control.FOCUS_NONE and control.is_visible_in_tree(): control.grab_focus()
 
 ## Opens the block that holds a line of this story's file (from a problem or a search).
 func focus_source_line(line: int) -> void:

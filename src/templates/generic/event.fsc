@@ -1,11 +1,14 @@
 // title: Something happens at a place
 // about: Found while exploring: an opening, then take it or leave it.
 // kind: event
-// question: name|Name|name|
-// question: area|Exploring area|zone|
-// question: repeat|How often|choice:once,until resolved,always|once
-// question: opening|What happens?|prose|You discover something unexpected.
-// question: item|An item to find (optional)|item?|
+// order: 2
+// step: When
+// question: name|Name|name||A name for you; players do not see it.
+// question: area|While exploring which area?|zone||Exploring is the most common way to find an event. An area is where creatures roam and things are found.
+// question: repeat|How often|choice:once,until resolved,always|once|Once, until it is finished, or every time.
+// step: What happens
+// question: opening|What does the player find?|prose|You discover something unexpected.
+// question: item|An item to take (optional)|item?|
 == event {{id}}
 name: {{name}}
 found by: exploring in {{area}}

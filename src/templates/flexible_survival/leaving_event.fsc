@@ -1,6 +1,7 @@
 // title: Stop the player when leaving
 // about: Interrupts the player on the way out of a place.
 // kind: event
+// order: 16
 // question: name|Name|name|
 // question: place|Leaving which place?|location|
 // question: opening|What interrupts the player?|prose|Someone calls you back.

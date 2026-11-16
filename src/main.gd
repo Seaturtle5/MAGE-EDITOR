@@ -97,6 +97,8 @@ var check_state: Button
 var settings_panel: PopupPanel
 var toast_undo: Button
 var crumbs: Label
+var actions: ContentActions
+var content_tools: HBoxContainer
 const SCALES := [90, 100, 110, 125, 150]
 const GROUP_ICONS := {"Events": "⚡", "Stories": "💬", "Items": "🎒", "Characters": "👤", "Creatures": "⚔", "Places": "📍", "Quests": "🏁", "Rules": "🔢", "Other": "…", "Pack": "📦", "Files": "🗎"}
 
@@ -331,6 +333,9 @@ func _build_ui() -> void:
 	detail.clip_text = true
 	detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	context.add_child(detail)
+	content_tools = HBoxContainer.new()
+	content_tools.add_theme_constant_override("separation", 2)
+	context.add_child(content_tools)
 	tabs = TabContainer.new()
 	tabs.tab_changed.connect(_on_tab_changed)
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -936,6 +941,7 @@ func _refresh_selection() -> void:
 	detail.text = Wording.name(d.type).capitalize() + ("   ·   from the pack “%s”, read-only" % selected.pack if not doc.writable else "")
 	detail.tooltip_text = "Technical ID: %s\n%s, line %d" % [d.id, doc.path, d.line]
 	_refresh_crumbs()
+	_refresh_content_tools()
 	source.text = doc.text
 	source.editable = doc.writable
 	if d.type in ["scene", "text", "menu"]:
@@ -1155,26 +1161,45 @@ func _open_problem(diagnostic: Dictionary) -> void:
 
 func _open_diagnostic(index: int) -> void:
 	var diagnostic: Dictionary = diagnostics_list.get_item_metadata(index)
+	var opened := _open_line(str(diagnostic.path), int(diagnostic.line))
+	if not opened.is_empty(): _set_status("Problem in %s: %s" % [Wording.title(opened), diagnostic.message])
+
+## Opens the content that holds a line of a file: its block when the line is
+## in a story, else its details. Returns the content, or nothing.
+func _open_line(path: String, line: int) -> Dictionary:
+	if not _entries_ready(): return {}
 	var closest: Dictionary = {}
 	for row: Dictionary in workspace.rows:
-		if row.doc.path == diagnostic.path and row.def.line <= diagnostic.line:
+		if row.doc.path == path and row.def.line <= line:
 			if closest.is_empty() or row.def.line > closest.def.line:
 				closest = row
 	if closest.is_empty():
-		_show_error("Open the source file to inspect: " + str(diagnostic.path))
-		return
+		_show_error("This line is no longer there: " + path.get_file())
+		return {}
 	selected = closest
 	_refresh_selection()
-	tabs.set_tab_hidden(3, closest.def.type not in ["scene", "menu", "event", "character"])
-	if closest.def.type in ["scene", "menu", "event", "character"]:
+	var definition: FscParser.Definition = closest.def
+	var story := definition.type in ["scene", "menu", "text"]
+	for key: String in definition.fields:
+		var field: FscParser.Field = definition.fields[key]
+		var last: int = field.children[-1].number if not field.children.is_empty() else field.line
+		if ContentDB.SCHEMA.get(definition.type, {}).get(key, "") in ["script", "menu"] and line >= field.line and line <= last:
+			story = true
+			if definition.type not in ["scene", "menu"]:
+				_open_visual_script(closest, key)
+				story_editor.focus_source_line(line)
+				return closest
+	tabs.set_tab_hidden(3, not story)
+	if story:
 		story_canvas.focus_definition(closest)
 		story_canvas.refresh()
 		tabs.current_tab = 3
+		story_editor.show_story(workspace, story_canvas.context_row)
+		story_editor.visible = true
+		story_editor.focus_source_line(line)
 	else:
 		tabs.current_tab = 4
-	if closest.def.type in ["scene", "menu", "event", "character"] and story_editor != null and not story_editor.row.is_empty():
-		story_editor.focus_source_line(int(diagnostic.line))
-	_set_status("Problem in %s: %s" % [Wording.title(closest), diagnostic.message])
+	return closest
 
 func _save_all() -> void:
 	if not _entries_ready():
@@ -1650,16 +1675,28 @@ func _declare_selected_dependency() -> void:
 func _ask_delete() -> void:
 	if not _entries_ready():
 		return
-	if selected.is_empty() or not selected.doc.writable:
-		_show_error("Choose a definition in the working pack to delete.")
+	if selected.is_empty() or not selected.has("def"):
+		_show_error("Choose content in the library first.")
 		return
-	if selected.def.type in ["pack", "file"]:
-		_show_error("Select an individual definition. The pack manifest and whole files cannot be deleted here.")
-		return
-	pending_action = "delete"
-	var mentions := workspace.mentions(selected).size()
-	confirm.dialog_text = "Delete %s %s? %d possible reference(s) mention this ID. Saved games may also use it. The change takes effect when you save." % [selected.def.type, selected.def.id, mentions]
-	confirm.popup_centered()
+	actions.delete(selected)
+
+## The row of buttons for the selected content: uses, rename, duplicate, delete.
+func _refresh_content_tools() -> void:
+	if content_tools == null: return
+	AuthoringLayout.clear(content_tools)
+	if selected.is_empty() or not selected.has("def") or selected.def.type in ["file", "pack"] or tabs.current_tab in [5, 6]: return
+	var row := selected
+	var used := workspace.uses(row.def.id).size()
+	var add := func(text: String, tooltip: String, action: Callable, enabled: bool = true) -> void:
+		var button := _button(text, action, tooltip)
+		button.theme_type_variation = "Ghost"
+		button.disabled = not enabled
+		content_tools.add_child(button)
+	if row.def.type == "quest": add.call("🏁 What moves it?", "See which stories set each stage of this quest, and add more.", func() -> void: actions.quest_flow(row), row.doc.writable)
+	add.call("🔗 %d" % used, "Where is this used? %d place%s in your pack." % [used, "" if used == 1 else "s"], func() -> void: actions.show_uses(row))
+	add.call("✎", "Rename everywhere it is used.", func() -> void: actions.rename(row), row.doc.writable)
+	add.call("⧉", "Duplicate" if row.doc.writable else "Copy into my pack", func() -> void: actions.make_copy(row))
+	add.call("🗑", "Delete, after showing what uses it.", func() -> void: actions.delete(row), row.doc.writable)
 
 func _delete_selected() -> void:
 	if selected.is_empty() or not selected.doc.writable:
@@ -1695,6 +1732,7 @@ func _entries_ready() -> bool:
 func _on_tab_changed(index: int) -> void:
 	if story_editor != null: story_editor.visible = index == 3 and not story_editor.row.is_empty()
 	for key: int in nav_buttons: nav_buttons[key].set_pressed_no_signal(key == index)
+	_refresh_content_tools()
 	_refresh_crumbs.call_deferred()
 	if visual_details != null and visual_details.pending_rows and index != 4:
 		tabs.current_tab = 4
@@ -1728,6 +1766,20 @@ func _open_reference_definition(index: int) -> void:
 
 
 func _build_workflow() -> void:
+	actions = ContentActions.new()
+	actions.workspace = workspace
+	add_child(actions)
+	actions.problem.connect(_show_error)
+	actions.open_line.connect(func(path: String, line: int) -> void: _open_line(path, line))
+	actions.changed.connect(func(row: Dictionary) -> void:
+		if row.is_empty(): return
+		_on_canvas_changed(row)
+		if tabs.current_tab != 3 or row.def.type not in ["scene", "menu", "character"]: _open_world_content(row))
+	actions.removed.connect(func() -> void:
+		selected.clear()
+		_refresh_all()
+		_navigate(6)
+		_set_status(str(workspace.history.steps[workspace.history.cursor - 1].label) + ".", true))
 	drops = ContentDropMenu.new()
 	add_child(drops)
 	drops.applied.connect(_on_canvas_changed)
@@ -1742,7 +1794,8 @@ func _build_workflow() -> void:
 			if row.doc.writable and row.def.id == result.id and row.def.type == result.type:
 				_open_world_content(row)
 				break
-		_set_status("Created “" + str(result.get("name", str(result.id).replace("_", " "))) + "”.", true))
+		_set_status("Created “" + str(result.get("name", str(result.id).replace("_", " "))) + "”.", true)
+		if result.type == "quest": actions.quest_flow(selected))
 	palette = CommandPalette.new()
 	add_child(palette)
 	palette.chosen.connect(_palette_chosen)

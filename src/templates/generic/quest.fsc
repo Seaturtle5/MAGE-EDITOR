@@ -1,8 +1,10 @@
 // title: Start a quest
 // about: Stages the player moves through; stories set the stage.
 // kind: quest
-// question: name|Name|name|
-// question: stages|Quest stages, one per line|stages|Not started;Looking;Complete
+// order: 4
+// step: The quest
+// question: name|Name|name||Shown in the player's journal.
+// question: stages|The stages, in order|stages|Not started;Looking;Complete|The first stage is where the quest starts. The last one finishes it.
 == quest {{id}}
 name: {{name}}
 stages:

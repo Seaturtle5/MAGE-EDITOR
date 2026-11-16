@@ -1,15 +1,21 @@
 // title: A creature you can fight
 // about: An infectious creature with its encounter and what happens on a win or a loss.
 // kind: creature
+// order: 10
+// step: The creature
 // question: name|Name|name|
-// question: area|Encounter area|zone|
-// question: strength|Difficulty|choice:weak,even,strong|even
-// question: form|Mutates toward|form|
-// question: opening|Encounter|prose|A creature approaches.
+// question: picture|Picture (optional)|image?|
+// question: area|Where is it met?|zone||The area the creature roams in. Make a new one if there is none yet.
+// question: strength|How dangerous is it?|choice:weak,even,strong|even|Sets its level, health and damage. Change the numbers later in its details.
+// step: Its body
+// question: form|Which body does it give?|form||Winning or losing against it can mutate the player toward this body form.
+// step: The encounter
+// question: opening|When the player meets it|prose|A creature approaches.
 // question: win|If the player wins|prose|You emerge victorious.
 // question: lose|If the player loses|prose|The creature has won.
 == creature {{id}}
 name: {{name}}
+image: {{picture}}
 found in: {{area}}
 level: {{level}}
 hp: {{hp}}

@@ -1,6 +1,7 @@
 // title: A companion
 // about: Someone who can join the party and follow along.
 // kind: character
+// order: 14
 // question: name|Name|name|
 // question: place|Home place|location|
 // question: greeting|Greeting|prose|I can join you.

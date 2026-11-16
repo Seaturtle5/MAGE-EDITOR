@@ -1,14 +1,19 @@
 // title: Make an item
 // about: Food, a drink or a thing to carry and use.
 // kind: item
+// order: 3
+// step: The item
 // question: name|Name|name|
-// question: description|Description|prose|A useful object.
-// question: category|Kind|choice:food,drink,other|food
-// question: hunger|Restore hunger by|number|10
+// question: description|Description|prose|A useful object.|Shown when the player looks at it.
+// question: picture|Picture (optional)|image?|
+// step: Using it
+// question: category|What is it?|choice:food,drink,other|food|Food and drink are used up and restore hunger or thirst.
+// question: hunger|How much does it restore?|number|10|For food and drink.
 == item {{id}}
 name: {{name}}
 description:
     {{description}}
+image: {{picture}}
 category: {{category}}
 weight: 1
 consumed: {{consumed}}
