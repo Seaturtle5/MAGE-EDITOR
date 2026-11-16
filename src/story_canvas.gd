@@ -21,6 +21,10 @@ var focused_definition: Dictionary = {}
 var focused_id := ""
 var show_everything := false
 var focus_only := false
+## Cards with their own writing controls, as before the side editor. Off: summary cards.
+var detailed_cards := false
+signal context_changed(row: Dictionary)
+var shown_context := ""
 var scope_button: Button
 var context_label: Label
 var context_row: Dictionary = {}
@@ -79,6 +83,11 @@ func _ready() -> void:
 		scope_button.text = "Show related stories" if show_everything else "Show all stories"
 		refresh())
 	toolbar.add_child(scope_button)
+	var arrange := Button.new()
+	arrange.text = "Tidy up"
+	arrange.tooltip_text = "Arrange the cards from left to right, following how the stories lead to each other."
+	arrange.pressed.connect(tidy)
+	toolbar.add_child(arrange)
 	var focused := CheckButton.new()
 	focused.text = "Focus only"
 	focused.toggled.connect(func(enabled: bool) -> void:
@@ -89,7 +98,8 @@ func _ready() -> void:
 	context_label = AuthoringLayout.label("Choose a story to start writing.", 14, true)
 	add_child(context_label)
 	var help := Label.new()
-	help.text = "Write in the bubbles. Drag a response's dot to another story. Right-click a connection to disconnect it."
+	help.text = "Select a card to see and change its blocks on the right. Drag a response's dot to another story to connect them; right-click a connection to remove it."
+	help.theme_type_variation = "MutedLabel"
 	help.add_theme_font_size_override("font_size", 12)
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(help)
@@ -113,6 +123,42 @@ func _ready() -> void:
 
 func configure(value: PackWorkspace) -> void:
 	workspace = value
+
+## Arranges the cards left to right, following how stories lead to each other.
+func tidy() -> void:
+	var incoming: Dictionary = {}
+	var outgoing: Dictionary = {}
+	for name: StringName in graph_rows:
+		incoming[name] = 0
+		outgoing[name] = []
+	for link: Dictionary in graph.get_connection_list():
+		if link.from_node == link.to_node or not outgoing.has(link.from_node) or not incoming.has(link.to_node): continue
+		outgoing[link.from_node].append(link.to_node)
+		incoming[link.to_node] += 1
+	var depth: Dictionary = {}
+	var queue: Array = []
+	for name: StringName in graph_rows:
+		if incoming[name] == 0:
+			depth[name] = 0
+			queue.append(name)
+	if queue.is_empty() and not graph_rows.is_empty():
+		depth[graph_rows.keys()[0]] = 0
+		queue.append(graph_rows.keys()[0])
+	while not queue.is_empty():
+		var name: StringName = queue.pop_front()
+		for next: StringName in outgoing[name]:
+			if depth.has(next): continue
+			depth[next] = int(depth[name]) + 1
+			queue.append(next)
+	var heights: Dictionary = {}
+	for name: StringName in graph_rows:
+		var column: int = depth.get(name, 0)
+		var card := graph.get_node(NodePath(name)) as GraphNode
+		var top: float = heights.get(column, 40.0)
+		card.position_offset = Vector2(40 + column * 360, top)
+		heights[column] = top + maxf(120.0, card.get_combined_minimum_size().y) + 36.0
+		positions[_row_key(graph_rows[name])] = card.position_offset
+	_save_layout()
 
 func refresh() -> void:
 	if workspace == null or graph == null:
@@ -159,7 +205,7 @@ func refresh() -> void:
 		var card := GraphNode.new()
 		card.name = "story_" + str(index)
 		card.title = d.id + (" · " + str(row.script_field).capitalize() if row.has("script_field") else "") + (" · " + d.mode if d.mode != "define" else "")
-		card.custom_minimum_size.x = 300
+		card.custom_minimum_size.x = 300 if detailed_cards else 270
 		var key := _row_key(row)
 		var column := index % 3
 		card.position_offset = positions.get(key, Vector2(45 + column * 380, y_offsets[column]))
@@ -174,6 +220,12 @@ func refresh() -> void:
 		y_offsets[column] += maxf(250.0, card.get_combined_minimum_size().y + 100.0)
 		index += 1
 	context_label.text += " · %d cards" % graph_rows.size()
+	graph.minimap_enabled = graph_rows.size() > 6
+	var context_key := _row_key(context_row) if not context_row.is_empty() else ""
+	if context_key != shown_context:
+		shown_context = context_key
+		if not context_row.is_empty(): context_changed.emit(context_row)
+		_show_context.call_deferred()
 	for from_name: StringName in graph_rows:
 		var row: Dictionary = graph_rows[from_name]
 		var options: Array = graph_options[from_name]
@@ -190,6 +242,19 @@ func refresh() -> void:
 			var call_target := StoryGraph.play_target(calls[i])
 			if destinations.has(call_target):
 				graph.connect_node(from_name, options.size() + (1 if has_continuation else 0) + i, destinations[call_target], 0)
+
+## Brings the story in focus into view, once the board has its size.
+func _show_context() -> void:
+	if not is_inside_tree(): return
+	await get_tree().process_frame
+	var target := Vector2.ZERO
+	for name: StringName in graph_rows:
+		if not context_row.is_empty() and _row_key(graph_rows[name]) == _row_key(context_row):
+			var card := graph.get_node_or_null(NodePath(name)) as GraphNode
+			if card != null:
+				card.selected = true
+				target = card.position_offset * graph.zoom - Vector2(30, 30)
+	graph.scroll_offset = Vector2(maxf(0.0, target.x), maxf(0.0, target.y))
 
 func _row_key(row: Dictionary) -> String:
 	var identity := "%s|%s|%s|%s|%d|%s" % [row.doc.path, row.def.type, row.def.id, row.def.mode, row.get("ordinal", 0), row.get("script_field", "")]
@@ -213,6 +278,9 @@ func _load_layout() -> void:
 
 func _moved(_from: Vector2, to: Vector2, key: String) -> void:
 	positions[key] = to
+	_save_layout()
+
+func _save_layout() -> void:
 	var folder := OS.get_user_data_dir().path_join("layouts")
 	if DirAccess.make_dir_recursive_absolute(folder) != OK:
 		problem.emit("Could not save the story board layout.")
@@ -223,7 +291,87 @@ func _moved(_from: Vector2, to: Vector2, key: String) -> void:
 	if config.save(_layout_path()) != OK:
 		problem.emit("Could not save the story board layout.")
 
+## A summary card: what the story is, how it starts, and where it leads.
+## The blocks themselves are read and changed in the side editor.
+func _build_summary(card: GraphNode, row: Dictionary) -> void:
+	var d: FscParser.Definition = row.def
+	card.title = Wording.title(row) + (" · " + StoryEditor.story_name(row) if row.has("script_field") else "")
+	card.tooltip_text = "Select to see its blocks in the side editor. Drag a response's dot to another story to connect them."
+	var top := HBoxContainer.new()
+	card.add_child(top)
+	var info := Label.new()
+	info.text = Wording.icon(d.type) + " " + Wording.name(d.type).capitalize() + ("" if row.doc.writable else " · " + str(row.pack) + ", read-only")
+	info.add_theme_font_size_override("font_size", 12)
+	info.add_theme_color_override("font_color", EditorTheme.category_color(d.type))
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(info)
+	var open_details := Button.new()
+	open_details.text = "Details"
+	open_details.theme_type_variation = "Ghost"
+	open_details.tooltip_text = "Open everything about this content."
+	open_details.pressed.connect(func() -> void: details_requested.emit(row))
+	top.add_child(open_details)
+	card.set_slot(0, d.type in ["scene", "menu"], 0, Color("d6a86b"), false, 0, Color.WHITE)
+	var entries := StoryGraph.structure(row)
+	var first := ""
+	var counts := {"text": 0, "effect": 0, "if": 0, "fight": 0}
+	var calls: Array = []
+	for entry: Dictionary in entries:
+		var kind: String = entry.node.kind
+		if counts.has(kind): counts[kind] += 1
+		if kind == "text" and first.is_empty(): first = Wording.prose(_display_dynamic(str(entry.node.text)))
+	for passage: Dictionary in StoryGraph.script_nodes(row):
+		if passage.kind == "play" and not StoryGraph.play_target(passage).is_empty(): calls.append(passage)
+	var excerpt := AuthoringLayout.label(first if first.length() <= 150 else first.left(148) + "…", 14, first.is_empty())
+	if first.is_empty(): excerpt.text = "Nothing written yet."
+	else: excerpt.theme_type_variation = "StoryLabel"
+	excerpt.custom_minimum_size.x = 250
+	excerpt.max_lines_visible = 3
+	card.add_child(excerpt)
+	var facts: Array[String] = []
+	for pair: Array in [["text", "passage"], ["effect", "action"], ["if", "condition"], ["fight", "fight"]]:
+		if counts[pair[0]] > 0: facts.append("%d %s%s" % [counts[pair[0]], pair[1], "" if counts[pair[0]] == 1 else "s"])
+	if not facts.is_empty():
+		var summary := AuthoringLayout.label(" · ".join(facts), 12, true)
+		card.add_child(summary)
+	for option: Dictionary in StoryGraph.choices(row):
+		var response := Label.new()
+		response.text = "› " + str(option.label) + ("  ◈" if not str(option.condition).is_empty() else "")
+		response.tooltip_text = "A response the player can choose." + (" Offered only if " + BlockCatalog.condition_sentence(str(option.condition), workspace).to_lower() + "." if not str(option.condition).is_empty() else "")
+		response.mouse_filter = Control.MOUSE_FILTER_PASS
+		response.clip_text = true
+		response.custom_minimum_size.x = 250
+		var slot := card.get_child_count()
+		card.add_child(response)
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("e8a660"))
+	var direct := StoryGraph.primary_transition(row)
+	var is_menu_field: bool = row.has("script_field") and ContentDB.SCHEMA.get(d.type, {}).get(row.script_field, "") == "menu"
+	var has_continuation := not direct.is_empty() or (not is_menu_field and (d.type in ["scene", "event", "character"] or row.has("script_field")))
+	graph_continuations[card.name] = has_continuation
+	if has_continuation:
+		var continuation := Label.new()
+		continuation.text = "⏹ Ends here" if direct.get("target", "") == "end" else ("↩ Returns to the conversation" if direct.get("target", "") == "back" else "➜ Then continues with…")
+		continuation.add_theme_font_size_override("font_size", 12)
+		continuation.theme_type_variation = "MutedLabel"
+		var slot := card.get_child_count()
+		card.add_child(continuation)
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("8fb9cf"))
+	graph_play_links[card.name] = calls
+	for action: Dictionary in calls:
+		var play_label := Label.new()
+		play_label.text = "▶ Plays " + BlockCatalog.content_label("scene", StoryGraph.play_target(action), workspace)
+		play_label.add_theme_font_size_override("font_size", 12)
+		var slot := card.get_child_count()
+		card.add_child(play_label)
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("a4c9a2"))
+	if row.doc.writable and d.type in ["scene", "menu"] and not row.has("script_field") and workspace.uses(d.id).is_empty():
+		var hint := AuthoringLayout.label("⚠ Nothing leads here yet", 12, true)
+		card.add_child(hint)
+
 func _build_card(card: GraphNode, row: Dictionary) -> void:
+	if not detailed_cards:
+		_build_summary(card, row)
+		return
 	var d: FscParser.Definition = row.def
 	var writable: bool = row.doc.writable
 	var info := Label.new()

@@ -1,4 +1,6 @@
 // title: Add a place
+// about: A new place on the map, connected to the others.
+// kind: location
 // question: name|Name|name|
 // question: description|Description|prose|A quiet place to explore.
 == location {{id}}

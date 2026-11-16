@@ -1,4 +1,6 @@
 // title: Something happens at a place
+// about: Found while exploring: an opening, then take it or leave it.
+// kind: event
 // question: name|Name|name|
 // question: area|Exploring area|zone|
 // question: repeat|How often|choice:once,until resolved,always|once

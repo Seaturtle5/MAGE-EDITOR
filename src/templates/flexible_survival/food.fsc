@@ -1,4 +1,6 @@
 // title: Food or drink with mutation
+// about: Restores hunger or thirst and may mutate whoever uses it.
+// kind: item
 // question: name|Name|name|
 // question: description|Description|prose|Something to eat.
 // question: form|Also mutates toward|form|

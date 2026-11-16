@@ -1,4 +1,6 @@
 // title: Open a shop
+// about: A place to buy and sell items.
+// kind: shop
 // question: name|Name|name|
 // question: place|Shop location|location|
 // question: item|First item to sell|item|

@@ -1,4 +1,6 @@
 // title: Talk to a character
+// about: Someone to meet, with a greeting and a few responses.
+// kind: character
 // question: name|Name|name|
 // question: pronouns|Pronouns|choice:they,she,he,it|they
 // question: place|Home place|location|

@@ -1,4 +1,6 @@
 // title: Make an item
+// about: Food, a drink or a thing to carry and use.
+// kind: item
 // question: name|Name|name|
 // question: description|Description|prose|A useful object.
 // question: category|Kind|choice:food,drink,other|food

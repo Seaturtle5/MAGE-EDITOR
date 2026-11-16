@@ -1,4 +1,6 @@
 // title: Start a quest
+// about: Stages the player moves through; stories set the stage.
+// kind: quest
 // question: name|Name|name|
 // question: stages|Quest stages, one per line|stages|Not started;Looking;Complete
 == quest {{id}}

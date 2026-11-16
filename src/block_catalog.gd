@@ -657,7 +657,7 @@ static func content_label(kind: String, id: String, workspace: PackWorkspace = n
 	if workspace != null:
 		var title := workspace.title_of(kind, id)
 		if not title.is_empty(): return title
-	return id.replace("_", " ").capitalize()
+	return Wording.readable(id)
 
 ## "adam.trust" reads "Adam's trust"; "player.hp" reads "the player's hp".
 static func value_label(path: String, workspace: PackWorkspace = null) -> String:

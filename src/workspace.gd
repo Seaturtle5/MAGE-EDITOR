@@ -568,3 +568,63 @@ func known_words(list: String) -> Array:
 	result.sort()
 	_words[list] = result
 	return result
+
+var _uses: Dictionary = {}
+var _uses_revision := -1
+
+## Where each ID is mentioned in the working pack: id -> [{row, line, text}].
+## Comments and the content's own block do not count.
+func uses_index() -> Dictionary:
+	if _uses_revision == revision: return _uses
+	_uses.clear()
+	_uses_revision = revision
+	var known: Dictionary = {}
+	for row: Dictionary in rows: known[row.def.id] = true
+	var token := RegEx.create_from_string("[a-z0-9_][a-z0-9_-]*")
+	for row: Dictionary in rows:
+		if not row.doc.writable: continue
+		var lines: PackedStringArray = str(row.doc.block(row.def)).split("\n")
+		for index in range(1, lines.size()):
+			var clean := lines[index].strip_edges()
+			if clean.is_empty() or clean.begins_with("//"): continue
+			var seen: Dictionary = {}
+			for matched: RegExMatch in token.search_all(clean):
+				var id := matched.get_string()
+				if not known.has(id) or id == row.def.id or seen.has(id): continue
+				# "name: Wolf" names the content itself, not another one.
+				if matched.get_start() > 0 and clean[matched.get_start() - 1] == "." : continue
+				seen[id] = true
+				if not _uses.has(id): _uses[id] = []
+				_uses[id].append({"row": row, "line": int(row.def.line) + index, "text": clean})
+	return _uses
+
+func uses(id: String) -> Array:
+	return uses_index().get(id, [])
+
+## Short notes on what a piece of content still needs, for the home page.
+func hints(row: Dictionary) -> Array[String]:
+	var notes: Array[String] = []
+	var definition: FscParser.Definition = row.def
+	var used := uses(definition.id).size()
+	match str(definition.type):
+		"scene", "menu":
+			notes.append("✓ written" if not StoryGraph.structure(row).is_empty() else "⚠ nothing written yet")
+			notes.append("✓ connected" if used > 0 else "⚠ nothing leads here yet")
+		"event":
+			notes.append("✓ written" if definition.fields.has("play") else "⚠ nothing written yet")
+			notes.append("✓ has a start" if definition.fields.has("found by") or used > 0 else "⚠ nothing starts this yet")
+		"character":
+			notes.append("✓ talks" if definition.fields.has("talk") else "⚠ no conversation yet")
+			notes.append("✓ has a home" if definition.fields.has("lives at") else "⚠ lives nowhere yet")
+		"item":
+			notes.append("✓ can be used" if definition.fields.has("use") or definition.fields.has("use action") or definition.fields.has("equipment") or definition.fields.has("weapon") else "· no use story")
+			notes.append("✓ can be found" if used > 0 else "⚠ nothing gives this yet")
+		"location":
+			notes.append("✓ connected" if definition.fields.has("exits") or used > 0 else "⚠ no paths lead here yet")
+		"quest":
+			notes.append("✓ moved by stories" if used > 0 else "⚠ nothing moves this quest yet")
+		"creature":
+			notes.append("✓ can be met" if definition.fields.has("found in") or used > 0 else "⚠ met nowhere yet")
+		_:
+			notes.append(Wording.name(definition.type))
+	return notes

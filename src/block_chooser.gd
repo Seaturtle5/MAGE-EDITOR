@@ -32,7 +32,7 @@ var typed := ""
 func _ready() -> void:
 	dialog_hide_on_ok = false
 	var body := VBoxContainer.new()
-	body.custom_minimum_size = Vector2(780, 540)
+	body.custom_minimum_size = Vector2(740, 480)
 	add_child(body)
 	search = LineEdit.new()
 	search.clear_button_enabled = true
@@ -51,7 +51,7 @@ func _ready() -> void:
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(split)
 	groups = ItemList.new()
-	groups.custom_minimum_size = Vector2(170, 200)
+	groups.custom_minimum_size = Vector2(170, 130)
 	groups.item_selected.connect(func(_index: int) -> void: _list())
 	split.add_child(groups)
 	var right := VBoxContainer.new()
@@ -59,7 +59,7 @@ func _ready() -> void:
 	split.add_child(right)
 	results = ItemList.new()
 	results.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	results.custom_minimum_size.y = 170
+	results.custom_minimum_size.y = 130
 	results.item_selected.connect(_select_row)
 	results.item_activated.connect(func(index: int) -> void:
 		_select_row(index)
@@ -74,7 +74,7 @@ func _ready() -> void:
 	body.add_child(panel)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size.y = 190
+	scroll.custom_minimum_size.y = 150
 	panel.add_child(scroll)
 	form = VBoxContainer.new()
 	form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -114,7 +114,7 @@ func open(pack: PackWorkspace, what: String = "action", where: Array = [], dropp
 	_suggest()
 	_list()
 	_show_form(current.get("entry", {}), current.get("slots", {}), current.get("quiet", false))
-	popup_centered_clamped(Vector2i(820, 680), 0.95)
+	popup_centered_clamped(Vector2i(800, 640), 0.9)
 	search.grab_focus()
 
 func _suggest() -> void:

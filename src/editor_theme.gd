@@ -18,6 +18,7 @@ const CATEGORY := {
 	"form": ["🧬", "8fd3f4", "2a7da3"], "creature": ["⚔", "e07a7a", "a23333"], "zone": ["🧭", "4cc9a4", "0f7a5c"], "region": ["🧭", "4cc9a4", "0f7a5c"],
 	"door": ["🚪", "4cc9a4", "0f7a5c"], "condition": ["❤", "e07a7a", "a23333"], "feat": ["★", "f2e05a", "8a7400"], "ending": ["✦", "f08a6b", "b0431f"],
 	"scenario": ["▶", "f08a6b", "b0431f"], "pack": ["📦", "9fb4c7", "4d6478"], "hook": ["⚡", "f2e05a", "8a7400"],
+	"shop": ["🛒", "e6a23c", "9a5a00"], "meter": ["📊", "9fb4c7", "4d6478"], "tag": ["🏷", "9fb4c7", "4d6478"], "filter": ["🚫", "9fb4c7", "4d6478"], "level": ["🎚", "9fb4c7", "4d6478"],
 }
 
 static func icon(kind: String) -> String:

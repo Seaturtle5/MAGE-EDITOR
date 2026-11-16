@@ -14,7 +14,7 @@ func _ready() -> void:
 	ok_button_text = "Apply"
 	dialog_hide_on_ok = false
 	var body := VBoxContainer.new()
-	body.custom_minimum_size = Vector2(620, 420)
+	body.custom_minimum_size = Vector2(600, 380)
 	add_child(body)
 	body.add_child(AuthoringLayout.label("This happens only when:", 16))
 	var scroll := ScrollContainer.new()
@@ -42,7 +42,7 @@ func open(workspace: PackWorkspace, text: String = "", context: Array = [], even
 	builder.configure(workspace, text, context, event)
 	error.text = ""
 	_refresh()
-	popup_centered_clamped(Vector2i(680, 560), 0.95)
+	popup_centered_clamped(Vector2i(660, 520), 0.9)
 	if text.strip_edges().is_empty(): builder.add_to.call_deferred(builder.root)
 
 func _refresh() -> void:

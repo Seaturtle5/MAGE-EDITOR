@@ -52,7 +52,6 @@ var new_mode: OptionButton
 var new_advanced: VBoxContainer
 var new_id_edited := false
 var new_type_buttons: Dictionary = {}
-var category_bar: TabBar
 var story_canvas: StoryCanvas
 var visual_details: VisualDetails
 var world_canvas: WorldCanvas
@@ -85,18 +84,27 @@ var recovery_dialog: ConfirmationDialog
 var recovery_pending := false
 var undo_button: Button
 var redo_button: Button
-var save_state: Label
+var save_state: Button
 var tour: AcceptDialog
 var tour_step := 0
 var tour_text: Label
 var import_queue: Array[String] = []
 var drops: ContentDropMenu
 var navigation: HBoxContainer
+var nav_buttons: Dictionary = {}
+var category_buttons: Dictionary = {}
+var check_state: Button
+var settings_panel: PopupPanel
+var toast_undo: Button
+var crumbs: Label
+const SCALES := [90, 100, 110, 125, 150]
+const GROUP_ICONS := {"Events": "⚡", "Stories": "💬", "Items": "🎒", "Characters": "👤", "Creatures": "⚔", "Places": "📍", "Quests": "🏁", "Rules": "🔢", "Other": "…", "Pack": "📦", "Files": "🗎"}
 
 func _ready() -> void:
 	get_window().title = "MAGE:EDITOR"
 	get_tree().auto_accept_quit = false
 	_build_theme()
+	_apply_scale()
 	_build_ui()
 	_build_workflow()
 	workspace.history.changed.connect(_history_changed)
@@ -129,6 +137,7 @@ func _change_theme(index: int) -> void:
 	EditorTheme.light = index == 1
 	theme = EditorTheme.build()
 	background.color = EditorTheme.color("bg")
+	_refresh_all()
 	var preferences := ConfigFile.new()
 	var path := OS.get_user_data_dir().path_join("preferences.cfg")
 	preferences.load(path)
@@ -162,93 +171,166 @@ func _build_ui() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 14)
+		margin.add_theme_constant_override(side, 10)
 	add_child(margin)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 10)
+	root.add_theme_constant_override("separation", 8)
 	margin.add_child(root)
-	var bar := HFlowContainer.new()
-	bar.add_theme_constant_override("separation", 8)
+	# One line on top: the pack, undo, find, create, and whether all is well.
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 6)
 	root.add_child(bar)
-	bar.add_child(_label("MAGE", 23))
-	var subtitle := _label(":EDITOR", 23)
+	var logo := _label("MAGE", 19)
+	bar.add_child(logo)
+	var subtitle := _label(":EDITOR", 19)
 	subtitle.theme_type_variation = "AccentLabel"
 	bar.add_child(subtitle)
-	bar.add_child(_spacer())
-	undo_button = _button("Undo", _undo, "Undo the last pack change (Ctrl+Z).")
-	bar.add_child(undo_button)
-	redo_button = _button("Redo", _redo, "Redo a pack change (Ctrl+Shift+Z).")
-	bar.add_child(redo_button)
-	bar.add_child(_button("Find…", _find_anything, "Find anything (Ctrl+K)."))
-	bar.add_child(_button("+ Create", _show_new, "Create a story, character, item or other content."))
-	bar.add_child(_button("Check pack", _validate, "Find problems before playing."))
-	bar.add_child(_button("Save all", _save_all))
-	side_toggle = Button.new()
-	side_toggle.text = "Show library"
-	side_toggle.tooltip_text = "Show or hide references, saved values and problems."
-	side_toggle.pressed.connect(_toggle_side_panel)
-	bar.add_child(side_toggle)
+	resized.connect(func() -> void:
+		logo.visible = size.x >= 1180
+		subtitle.visible = logo.visible)
 	var file_menu := MenuButton.new()
 	file_menu.text = "Pack ▾"
+	file_menu.flat = false
+	file_menu.tooltip_text = "Create or open a pack, add other packs to use their content, import pictures."
 	var popup := file_menu.get_popup()
-	for label in ["New pack", "Open pack", "Add reference pack", "Import image", "Delete selected content"]:
-		popup.add_item(label)
+	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["", -1], ["Delete the selected content…", 4]]:
+		if entry[1] < 0: popup.add_separator()
+		else: popup.add_item(entry[0], entry[1])
 	popup.id_pressed.connect(_on_pack_menu)
 	bar.add_child(file_menu)
+	pack_label = _label("No pack open", 16)
+	pack_label.clip_text = true
+	pack_label.custom_minimum_size.x = 90
+	pack_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(pack_label)
+	undo_button = _button("⟲", _undo, "Undo the last change (Ctrl+Z).")
+	bar.add_child(undo_button)
+	redo_button = _button("⟳", _redo, "Redo (Ctrl+Shift+Z).")
+	bar.add_child(redo_button)
+	var find := _button("🔍 Find anything", _find_anything, "Jump to any content, story text or value, or run a command (Ctrl+K).")
+	bar.add_child(find)
+	var create := _button("＋ Create", _show_new, "Create a story, character, item or other content.")
+	create.theme_type_variation = "PrimaryButton"
+	bar.add_child(create)
+	check_state = _button("✓ Check", _validate, "Check the pack with the game engine and list any problems.")
+	bar.add_child(check_state)
+	save_state = _button("💾 Saved", _save_all, "Write your changes to the pack's files (Ctrl+S).")
+	bar.add_child(save_state)
+	side_toggle = _button("☰", _toggle_side_panel, "Show or hide the lists of saved values and problems.")
+	bar.add_child(side_toggle)
+	var settings := _button("⚙", func() -> void: settings_panel.popup(Rect2i(Vector2i(get_window().size.x - 330, 52), Vector2i(310, 0))), "Appearance, interface size and technical views.")
+	bar.add_child(settings)
+	settings_panel = PopupPanel.new()
+	add_child(settings_panel)
+	var settings_body := VBoxContainer.new()
+	settings_body.custom_minimum_size.x = 290
+	settings_panel.add_child(settings_body)
+	settings_body.add_child(_label("Appearance", 13))
 	theme_picker = OptionButton.new()
 	theme_picker.add_item("MAGE Dark")
 	theme_picker.add_item("Cream Light")
 	theme_picker.select(1 if EditorTheme.light else 0)
 	theme_picker.tooltip_text = "Choose the editor appearance. Your choice is remembered."
 	theme_picker.item_selected.connect(_change_theme)
-	bar.add_child(theme_picker)
+	settings_body.add_child(theme_picker)
+	settings_body.add_child(_label("Interface size", 13))
+	var scale_picker := OptionButton.new()
+	for percent: int in SCALES: scale_picker.add_item("%d%%" % percent)
+	scale_picker.select(maxi(0, SCALES.find(int(_preference("appearance", "scale", 100)))))
+	scale_picker.item_selected.connect(func(index: int) -> void:
+		_set_preference("appearance", "scale", SCALES[index])
+		_apply_scale())
+	settings_body.add_child(scale_picker)
+	var motion := CheckButton.new()
+	motion.text = "Reduce motion"
+	motion.tooltip_text = "Switch off fades and other movement."
+	motion.button_pressed = bool(_preference("appearance", "reduce_motion", false))
+	motion.toggled.connect(func(enabled: bool) -> void: _set_preference("appearance", "reduce_motion", enabled))
+	settings_body.add_child(motion)
 	var advanced := CheckButton.new()
-	advanced.text = "Advanced"
-	advanced.tooltip_text = "Show the technical views."
+	advanced.text = "Technical views"
+	advanced.tooltip_text = "Show the content format's text views. Not needed for writing."
 	advanced.toggled.connect(_toggle_advanced)
-	bar.add_child(advanced)
-	pack_label = _label("No pack open", 13)
-	pack_label.clip_text = true
-	root.add_child(pack_label)
-	category_bar = TabBar.new()
-	category_bar.tab_alignment = TabBar.ALIGNMENT_LEFT
-	for category: String in GROUPS:
-		category_bar.add_tab(category)
-	category_bar.tab_changed.connect(func(index: int) -> void:
-		group = category_bar.get_tab_title(index)
-		_refresh_browser()
-		if group == "Places" and world_canvas != null:
-			tabs.current_tab = 5)
-	root.add_child(category_bar)
+	settings_body.add_child(advanced)
 	var split := HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(split)
+	# Left: everything in the working pack and the other packs, to choose or drag.
 	var left := VBoxContainer.new()
-	left.custom_minimum_size.x = 215
+	left.custom_minimum_size.x = 236
 	split.add_child(left)
-	left.add_child(_label("LIBRARY · DRAG OR CHOOSE", 13))
+	var library_title := _label("LIBRARY", 13)
+	library_title.theme_type_variation = "MutedLabel"
+	library_title.tooltip_text = "Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker."
+	left.add_child(library_title)
 	search = LineEdit.new()
-	search.placeholder_text = "Search content…"
+	search.placeholder_text = "Search the library…"
+	search.clear_button_enabled = true
 	search.text_changed.connect(func(_text: String) -> void: _refresh_browser())
 	left.add_child(search)
+	var kinds := HFlowContainer.new()
+	kinds.add_theme_constant_override("h_separation", 2)
+	kinds.add_theme_constant_override("v_separation", 2)
+	left.add_child(kinds)
+	var kind_group := ButtonGroup.new()
+	for category: String in GROUPS:
+		var button := Button.new()
+		button.text = "All" if category == "All" else str(GROUP_ICONS.get(category, category))
+		button.tooltip_text = "Show everything" if category == "All" else "Show only: " + category
+		button.toggle_mode = true
+		button.button_group = kind_group
+		button.button_pressed = category == "All"
+		button.theme_type_variation = "Ghost"
+		button.pressed.connect(func() -> void:
+			group = category
+			_refresh_browser()
+			if group == "Places" and world_canvas != null: _navigate(5))
+		kinds.add_child(button)
+		category_buttons[category] = button
 	browser = ContentLibrary.new()
 	browser.hide_root = true
 	browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	browser.item_selected.connect(_on_browser_selected)
+	browser.item_collapsed.connect(_fill_library_section)
 	left.add_child(browser)
+	var hint := _label("Drag entries into a story or onto the map.", 12)
+	hint.theme_type_variation = "MutedLabel"
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	left.add_child(hint)
 	var center_split := HSplitContainer.new()
 	center_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	split.add_child(center_split)
+	# Centre: the four places.
 	var center := VBoxContainer.new()
-	center.custom_minimum_size.x = 280
+	center.custom_minimum_size.x = 300
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center_split.add_child(center)
-	heading = _label("Choose something to edit", 22)
-	heading.clip_text = true
-	center.add_child(heading)
-	detail = _label("Select a definition from the content browser.", 13)
+	navigation = HBoxContainer.new()
+	navigation.add_theme_constant_override("separation", 2)
+	center.add_child(navigation)
+	var nav_group := ButtonGroup.new()
+	for place: Array in [["🏠 Home", 6, "Start here: tasks, recent work and problems."], ["💬 Stories", 3, "The board of stories and how they connect."], ["🧭 Map", 5, "Places, the paths between them and what happens there."], ["📋 Details", 4, "Everything about the selected content."]]:
+		var button := _button(place[0], _navigate.bind(place[1]), place[2])
+		button.toggle_mode = true
+		button.button_group = nav_group
+		button.theme_type_variation = "StepButton"
+		navigation.add_child(button)
+		nav_buttons[place[1]] = button
+	var help := _button("? Help", _show_tour, "A short tour of the editor.")
+	help.theme_type_variation = "Ghost"
+	navigation.add_child(help)
+	var context := HBoxContainer.new()
+	center.add_child(context)
+	heading = _label("Choose something to edit", 20)
+	heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.size_flags_stretch_ratio = 2.0
+	context.add_child(heading)
+	detail = _label("Select an entry in the library.", 13)
+	detail.theme_type_variation = "MutedLabel"
 	detail.clip_text = true
-	center.add_child(detail)
+	detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	context.add_child(detail)
 	tabs = TabContainer.new()
 	tabs.tab_changed.connect(_on_tab_changed)
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -265,13 +347,8 @@ func _build_ui() -> void:
 	home.task_requested.connect(_start_task)
 	home.open_requested.connect(_open_world_content)
 	home.check_requested.connect(_validate)
-	navigation = HBoxContainer.new()
-	center.add_child(navigation)
-	center.move_child(navigation, center.get_child_count() - 2)
-	for place: String in ["Home", "Stories", "Map", "Details"]:
-		var index: int = {"Home": 6, "Stories": 3, "Map": 5, "Details": 4}[place]
-		navigation.add_child(_button(place, _navigate.bind(index)))
-	navigation.add_child(_button("Help", _show_tour))
+	home.create_requested.connect(_show_new)
+	home.problem_requested.connect(_open_problem)
 	tabs.tabs_visible = false
 	tabs.current_tab = 3
 	tabs.set_tab_title(0, "Advanced story")
@@ -279,7 +356,8 @@ func _build_ui() -> void:
 	tabs.set_tab_title(2, "Advanced file")
 	for i in 3:
 		tabs.set_tab_hidden(i, true)
-	category_bar.set_tab_hidden(category_bar.tab_count - 1, true)
+	category_buttons["Files"].hide()
+	# Right: the selected story as blocks, with its preview.
 	story_editor = StoryEditor.new()
 	center_split.add_child(story_editor)
 	story_editor.hide()
@@ -293,10 +371,11 @@ func _build_ui() -> void:
 	story_editor.validated.connect(func() -> void:
 		_refresh_diagnostics()
 		_history_changed())
-	story_canvas.graph.node_selected.connect(func(name: StringName) -> void:
-		if story_canvas.graph_rows.has(name):
-			story_editor.show_story(workspace, story_canvas.graph_rows[name])
-			story_editor.visible = tabs.current_tab == 3)
+	story_canvas.graph.node_selected.connect(func(node: Node) -> void:
+		if story_canvas.graph_rows.has(node.name):
+			story_editor.show_story(workspace, story_canvas.graph_rows[node.name])
+			story_editor.visible = tabs.current_tab == 3
+			_refresh_crumbs())
 	side_panel = VBoxContainer.new()
 	side_panel.custom_minimum_size.x = 270
 	center_split.add_child(side_panel)
@@ -305,7 +384,7 @@ func _build_ui() -> void:
 	side_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	side_panel.add_child(side_tabs)
 	var ref_box := VBoxContainer.new()
-	ref_box.name = "References"
+	ref_box.name = "Packs"
 	side_tabs.add_child(ref_box)
 	ref_box.add_child(_label("Find content in your loaded packs", 13))
 	var scope := HBoxContainer.new()
@@ -320,7 +399,7 @@ func _build_ui() -> void:
 		scope.add_child(scope_button)
 	ref_box.add_child(scope)
 	reference_search = LineEdit.new()
-	reference_search.placeholder_text = "Search IDs, types and packs…"
+	reference_search.placeholder_text = "Search names, kinds and packs…"
 	reference_search.text_changed.connect(func(_text: String) -> void: _refresh_references())
 	ref_box.add_child(reference_search)
 	references = ReferenceList.new()
@@ -329,14 +408,14 @@ func _build_ui() -> void:
 	ref_box.add_child(references)
 	reference_count = _label("", 12)
 	ref_box.add_child(reference_count)
-	ref_box.add_child(_button("Add selected pack as dependency", _declare_selected_dependency))
+	ref_box.add_child(_button("Require the selected entry's pack", _declare_selected_dependency, "Adds the pack to the packs your pack needs."))
 	var values_box := VBoxContainer.new()
 	values_box.name = "Values"
 	side_tabs.add_child(values_box)
-	values_box.add_child(_label("FLAGS, VALUES AND QUEST STAGES", 13))
-	values_box.add_child(_label("Use these saved values in story conditions and actions.", 12))
+	values_box.add_child(_label("COUNTERS, THINGS TO REMEMBER AND STAGES", 13))
+	values_box.add_child(_label("What the game remembers. Conditions check these; actions change them.", 12))
 	values_search = LineEdit.new()
-	values_search.placeholder_text = "Search values and flags…"
+	values_search.placeholder_text = "Search saved values…"
 	values_search.text_changed.connect(func(_text: String) -> void: _refresh_values())
 	values_box.add_child(values_search)
 	values_list = ItemList.new()
@@ -345,18 +424,33 @@ func _build_ui() -> void:
 	var diag_box := VBoxContainer.new()
 	diag_box.name = "Problems"
 	side_tabs.add_child(diag_box)
-	diag_box.add_child(_label("ENGINE VALIDATION", 13))
-	diag_box.add_child(_label("Double-click a problem to open its source.", 12))
+	diag_box.add_child(_label("PROBLEMS FOUND BY THE GAME ENGINE", 13))
+	diag_box.add_child(_label("Double-click a problem to open the place it is in.", 12))
 	diagnostics_list = ItemList.new()
 	diagnostics_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	diagnostics_list.item_activated.connect(_open_diagnostic)
 	diag_box.add_child(diagnostics_list)
-	save_state = _label("Saved", 13)
-	root.add_child(save_state)
+	# Bottom: what just happened, with Undo, and where you are.
+	var foot := HBoxContainer.new()
+	root.add_child(foot)
 	status = _label("", 13)
 	status.clip_text = true
-	root.add_child(status)
+	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(status)
+	toast_undo = _button("Undo", _undo, "Undo what just happened.")
+	toast_undo.theme_type_variation = "Ghost"
+	toast_undo.hide()
+	foot.add_child(toast_undo)
+	crumbs = _label("", 13)
+	crumbs.theme_type_variation = "MutedLabel"
+	crumbs.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	crumbs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	crumbs.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	foot.add_child(crumbs)
 	_build_dialogs()
+
+func _apply_scale() -> void:
+	get_window().content_scale_factor = float(_preference("appearance", "scale", 100)) / 100.0
 
 func _toggle_side_panel() -> void:
 	_set_side_panel(not side_panel.visible)
@@ -368,10 +462,12 @@ func _on_pack_menu(id: int) -> void:
 		2: _choose_reference()
 		3: _choose_image()
 		4: _ask_delete()
+		5: _validate()
+		6: _save_all()
 
 func _set_side_panel(open: bool) -> void:
 	side_panel.visible = open
-	side_toggle.text = "Hide library" if open else "Show library"
+	side_toggle.button_pressed = open
 
 func _set_reference_scope(scope: String) -> void:
 	reference_scope = scope
@@ -561,10 +657,24 @@ func _build_dialogs() -> void:
 	image_info_dialog.canceled.connect(func() -> void: _next_import.call_deferred())
 	add_child(image_info_dialog)
 
-func _set_status(text: String) -> void:
+func _set_status(text: String, undoable: bool = false) -> void:
 	status.text = text
-	if workspace.dirty_count() > 0:
-		status.text += "   •   %d unsaved file(s)" % workspace.dirty_count()
+	toast_undo.visible = undoable and workspace.history.cursor > 0
+
+## Where the author is: pack, kind, content and story.
+func _refresh_crumbs() -> void:
+	if crumbs == null: return
+	var parts: Array[String] = [str(workspace.manifest(workspace.target).get("id", "No pack"))]
+	if tabs.current_tab == 6: parts.append("Home")
+	elif tabs.current_tab == 5: parts.append("Map")
+	if not selected.is_empty() and selected.has("def") and tabs.current_tab != 6:
+		parts.append(Wording.plural(selected.def.type))
+		parts.append(Wording.title(selected))
+	if tabs.current_tab == 3 and story_editor != null and not story_editor.row.is_empty():
+		if selected.is_empty() or story_editor.row.def.id != selected.def.id: parts.append(Wording.title(story_editor.row))
+		parts.append(StoryEditor.story_name(story_editor.row))
+	crumbs.text = " › ".join(parts)
+	crumbs.tooltip_text = crumbs.text
 
 func _show_error(text: String) -> void:
 	if text.is_empty():
@@ -669,8 +779,10 @@ func _open_target(path: String) -> void:
 
 func _refresh_all() -> void:
 	var info := workspace.manifest(workspace.target)
-	pack_label.text = "%s · %d reference packs" % [info.get("id", "Open a pack"), maxi(0, workspace.pack_paths.size() - 1)]
+	var others := maxi(0, workspace.pack_paths.size() - 1)
+	pack_label.text = str(workspace.title_of("pack", str(info.get("id", ""))) if not workspace.title_of("pack", str(info.get("id", ""))).is_empty() else info.get("id", "Open a pack")) + ("  ·  uses %d other pack%s" % [others, "" if others == 1 else "s"] if others > 0 else "")
 	pack_label.tooltip_text = workspace.target
+	_refresh_crumbs()
 	_refresh_browser()
 	_refresh_references()
 	_refresh_values()
@@ -697,49 +809,84 @@ func _refresh_browser() -> void:
 		return
 	browser.clear()
 	var root := browser.create_item()
-	var sections: Dictionary = {}
 	var query := search.text.to_lower()
 	if group == "Files":
+		var files := browser.create_item(root)
+		files.set_text(0, "Files of my pack")
+		files.set_selectable(0, false)
 		for path: String in workspace.documents:
 			var doc: PackDocument = workspace.documents[path]
-			if not doc.writable:
-				continue
-			if not query.is_empty() and query not in path.to_lower():
-				continue
+			if not doc.writable or (not query.is_empty() and query not in path.to_lower()): continue
 			var folder := workspace.owner(path)
-			var info := workspace.manifest(folder)
-			var section := "Working pack" if doc.writable else "Reference: " + str(info.get("id", folder.get_file()))
-			if not sections.has(section):
-				var parent := browser.create_item(root)
-				parent.set_text(0, section)
-				parent.set_selectable(0, false)
-				sections[section] = parent
-			var file_item := browser.create_item(sections[section])
+			var file_item := browser.create_item(files)
 			file_item.set_text(0, path.trim_prefix(folder + "/"))
 			var placeholder := FscParser.Definition.new()
 			placeholder.type = "file"
 			placeholder.id = path.get_file()
 			placeholder.path = path
 			placeholder.line = 1
-			file_item.set_metadata(0, {"def": placeholder, "doc": doc, "pack": info.get("id", folder.get_file()), "root": folder})
+			file_item.set_metadata(0, {"def": placeholder, "doc": doc, "pack": workspace.manifest(folder).get("id", folder.get_file()), "root": folder})
 		return
+	# My pack by kind; other packs fold away and fill in when opened.
+	var mine: Dictionary = {}
+	var others: Dictionary = {}
 	for row: Dictionary in workspace.rows:
 		var definition: FscParser.Definition = row.def
-		if not _matches_group(definition.type):
-			continue
-		var display: String = definition.fields["name"].value if definition.fields.has("name") else definition.id
-		if not query.is_empty() and query not in (display + " " + definition.id + " " + definition.type + " " + row.pack).to_lower():
-			continue
-		var section: String = ("My pack" if row.doc.writable else "Other packs / " + row.pack) + " / " + Wording.name(definition.type).capitalize()
-		if not sections.has(section):
-			var parent := browser.create_item(root)
-			parent.set_text(0, section)
-			parent.set_selectable(0, false)
-			sections[section] = parent
-		var item := browser.create_item(sections[section])
-		item.set_text(0, Wording.icon(definition.type) + " " + display + ("  [" + definition.mode + "]" if definition.mode != "define" else ""))
-		item.set_metadata(0, row)
-		item.set_tooltip_text(0, row.doc.path + ":" + str(definition.line))
+		if not _matches_group(definition.type): continue
+		if not query.is_empty() and query not in (Wording.title(row) + " " + definition.id + " " + Wording.name(definition.type) + " " + definition.type + " " + row.pack).to_lower(): continue
+		var table: Dictionary = mine if row.doc.writable else others
+		var key: String = definition.type if row.doc.writable else row.pack
+		if not table.has(key): table[key] = []
+		table[key].append(row)
+	var own := browser.create_item(root)
+	own.set_text(0, "My pack")
+	own.set_selectable(0, false)
+	var kinds: Array = mine.keys()
+	kinds.sort_custom(func(a: String, b: String) -> bool: return Wording.order(a) < Wording.order(b))
+	for kind: String in kinds:
+		var section := browser.create_item(own)
+		section.set_text(0, "%s  %s  (%d)" % [Wording.icon(kind), Wording.plural(kind), mine[kind].size()])
+		section.set_selectable(0, false)
+		section.set_custom_color(0, EditorTheme.category_color(kind))
+		section.collapsed = query.is_empty() and kind in ["pack", "image", "values"] and mine[kind].size() > 6
+		for row: Dictionary in mine[kind]: _library_item(section, row, false)
+	if mine.is_empty():
+		var empty := browser.create_item(own)
+		empty.set_text(0, "Nothing matches." if not query.is_empty() or group != "All" else "Nothing yet. Start on Home.")
+		empty.set_selectable(0, false)
+	var packs: Array = others.keys()
+	packs.sort()
+	for pack: String in packs:
+		var section := browser.create_item(root)
+		section.set_text(0, "📦  %s  (%d)" % [pack, others[pack].size()])
+		section.set_tooltip_text(0, "Content of another pack: use it in your stories, but it cannot be changed here.")
+		section.set_selectable(0, false)
+		section.set_metadata(0, {"lazy": others[pack]})
+		var waiting := browser.create_item(section)
+		waiting.set_text(0, "…")
+		waiting.set_selectable(0, false)
+		section.collapsed = true
+		if not query.is_empty() and others[pack].size() <= 40:
+			section.collapsed = false
+			_fill_library_section(section)
+
+func _library_item(parent: TreeItem, row: Dictionary, with_kind: bool) -> void:
+	var item := browser.create_item(parent)
+	item.set_text(0, (Wording.icon(row.def.type) + " " if with_kind else "") + Wording.title(row) + ("  [" + str(row.def.mode) + "]" if row.def.mode != "define" else ""))
+	item.set_metadata(0, row)
+	item.set_tooltip_text(0, Wording.name(row.def.type).capitalize() + " · " + str(row.pack) + "\nDrag into a story or onto the map, or choose to open.")
+
+func _fill_library_section(section: TreeItem) -> void:
+	var data: Variant = section.get_metadata(0)
+	if section.collapsed or not data is Dictionary or not data.has("lazy"): return
+	var rows: Array = data.lazy
+	section.set_metadata(0, {})
+	for child: TreeItem in section.get_children(): child.free()
+	for index in mini(rows.size(), 400): _library_item(section, rows[index], true)
+	if rows.size() > 400:
+		var more := browser.create_item(section)
+		more.set_text(0, "… %d more. Search to find them." % (rows.size() - 400))
+		more.set_selectable(0, false)
 
 func _on_browser_selected() -> void:
 	if not _entries_ready():
@@ -785,8 +932,10 @@ func _refresh_selection() -> void:
 		return
 	var d: FscParser.Definition = selected.def
 	var doc: PackDocument = selected.doc
-	heading.text = d.fields["name"].value if d.fields.has("name") and not d.fields["name"].value.is_empty() else d.id
-	detail.text = "%s   ·   %s   ·   ID: %s%s" % [d.type.capitalize(), selected.pack, d.id, "   ·   Read-only" if not doc.writable else ""]
+	heading.text = Wording.icon(d.type) + " " + Wording.title(selected)
+	detail.text = Wording.name(d.type).capitalize() + ("   ·   from the pack “%s”, read-only" % selected.pack if not doc.writable else "")
+	detail.tooltip_text = "Technical ID: %s\n%s, line %d" % [d.id, doc.path, d.line]
+	_refresh_crumbs()
 	source.text = doc.text
 	source.editable = doc.writable
 	if d.type in ["scene", "text", "menu"]:
@@ -977,15 +1126,32 @@ func _validate() -> void:
 	workspace.validate()
 	_refresh_values()
 	_refresh_diagnostics()
-	_set_side_panel(true)
-	side_tabs.current_tab = 2
-	_set_status("Validated the current workspace, including unsaved edits: %d problem(s)." % workspace.diagnostics.size())
+	if home != null: home.refresh(workspace)
+	var errors := workspace.diagnostics.filter(func(item: Dictionary) -> bool: return item.severity == "error").size()
+	if not workspace.diagnostics.is_empty():
+		_set_side_panel(true)
+		side_tabs.current_tab = 2
+	_set_status("Checked the pack with the game engine, unsaved changes included: " + ("no problems." if workspace.diagnostics.is_empty() else "%d problem%s, %d note%s." % [errors, "" if errors == 1 else "s", workspace.diagnostics.size() - errors, "" if workspace.diagnostics.size() - errors == 1 else "s"]))
 
 func _refresh_diagnostics() -> void:
 	diagnostics_list.clear()
+	var errors := 0
 	for item: Dictionary in workspace.diagnostics:
-		diagnostics_list.add_item("%s  %s:%d\n%s" % [str(item.severity).to_upper(), str(item.path).get_file(), int(item.line), item.message])
+		if item.severity == "error": errors += 1
+		diagnostics_list.add_item("%s  %s, line %d\n%s" % ["⚠ Problem" if item.severity == "error" else "Note", str(item.path).get_file(), int(item.line), item.message])
 		diagnostics_list.set_item_metadata(diagnostics_list.item_count - 1, item)
+	if check_state != null:
+		var fresh: bool = workspace.validation_revision == workspace.revision
+		check_state.text = ("⚠ %d problem%s" % [errors, "" if errors == 1 else "s"]) if errors > 0 else ("✓ No problems" if fresh else "✓ Check")
+		check_state.add_theme_color_override("font_color", EditorTheme.color("bad") if errors > 0 else EditorTheme.color("good") if fresh else EditorTheme.color("text"))
+
+## Opens the place a problem is in: the block of a story, or the content's details.
+func _open_problem(diagnostic: Dictionary) -> void:
+	for index in diagnostics_list.item_count:
+		var listed: Dictionary = diagnostics_list.get_item_metadata(index)
+		if listed.path == diagnostic.path and int(listed.line) == int(diagnostic.line) and listed.message == diagnostic.message:
+			_open_diagnostic(index)
+			return
 
 func _open_diagnostic(index: int) -> void:
 	var diagnostic: Dictionary = diagnostics_list.get_item_metadata(index)
@@ -1006,7 +1172,9 @@ func _open_diagnostic(index: int) -> void:
 		tabs.current_tab = 3
 	else:
 		tabs.current_tab = 4
-	_set_status("Problem in %s, line %d: %s" % [str(diagnostic.path).get_file(), int(diagnostic.line), diagnostic.message])
+	if closest.def.type in ["scene", "menu", "event", "character"] and story_editor != null and not story_editor.row.is_empty():
+		story_editor.focus_source_line(int(diagnostic.line))
+	_set_status("Problem in %s: %s" % [Wording.title(closest), diagnostic.message])
 
 func _save_all() -> void:
 	if not _entries_ready():
@@ -1238,6 +1406,11 @@ func _build_graph_tab() -> void:
 		_refresh_selection()
 		tabs.current_tab = 4)
 	story_canvas.changed.connect(_on_canvas_changed)
+	story_canvas.context_changed.connect(func(row: Dictionary) -> void:
+		if story_editor == null: return
+		story_editor.show_story(workspace, row)
+		story_editor.visible = tabs.current_tab == 3
+		_refresh_crumbs())
 	story_canvas.problem.connect(_show_error)
 	story_canvas.new_story_requested.connect(_new_story_node)
 	story_canvas.next_story_requested.connect(_new_next_story)
@@ -1321,7 +1494,8 @@ func _refresh_graph() -> void:
 func _on_canvas_changed(row: Dictionary) -> void:
 	selected = row
 	_refresh_all()
-	_set_status("Changes made. Select Save all to keep them.")
+	var last: String = str(workspace.history.steps[workspace.history.cursor - 1].label) if workspace.history.cursor > 0 else "Changed"
+	_set_status(last + ".", true)
 
 func _create_pack() -> void:
 	var id := pack_id.text.strip_edges()
@@ -1508,7 +1682,7 @@ func _toggle_advanced(enabled: bool) -> void:
 	for i in 3:
 		tabs.set_tab_hidden(i, not enabled)
 	tabs.tabs_visible = enabled
-	category_bar.set_tab_hidden(category_bar.tab_count - 1, not enabled)
+	category_buttons["Files"].visible = enabled
 	if not enabled and tabs.current_tab < 3:
 		tabs.current_tab = 4 if tabs.is_tab_hidden(3) else 3
 
@@ -1520,6 +1694,8 @@ func _entries_ready() -> bool:
 
 func _on_tab_changed(index: int) -> void:
 	if story_editor != null: story_editor.visible = index == 3 and not story_editor.row.is_empty()
+	for key: int in nav_buttons: nav_buttons[key].set_pressed_no_signal(key == index)
+	_refresh_crumbs.call_deferred()
 	if visual_details != null and visual_details.pending_rows and index != 4:
 		tabs.current_tab = 4
 		_show_error("Apply your edited entries before leaving this section.")
@@ -1566,7 +1742,7 @@ func _build_workflow() -> void:
 			if row.doc.writable and row.def.id == result.id and row.def.type == result.type:
 				_open_world_content(row)
 				break
-		_set_status("Created " + str(result.id).replace("_", " ") + " · Undo is available."))
+		_set_status("Created “" + str(result.get("name", str(result.id).replace("_", " "))) + "”.", true))
 	palette = CommandPalette.new()
 	add_child(palette)
 	palette.chosen.connect(_palette_chosen)
@@ -1621,8 +1797,13 @@ func _history_changed() -> void:
 	undo_button.disabled = workspace.history.cursor == 0
 	redo_button.disabled = workspace.history.cursor >= workspace.history.steps.size()
 	undo_button.tooltip_text = "Undo " + (str(workspace.history.steps[workspace.history.cursor - 1].label) if workspace.history.cursor > 0 else "(no changes)")
+	redo_button.tooltip_text = "Redo " + (str(workspace.history.steps[workspace.history.cursor].label) if workspace.history.cursor < workspace.history.steps.size() else "(nothing to redo)")
 	if save_state != null:
-		save_state.text = "Saved" if workspace.dirty_count() == 0 else "● %d unsaved files" % workspace.dirty_count()
+		var unsaved := workspace.dirty_count()
+		save_state.text = "💾 Saved" if unsaved == 0 else "● Save %d" % unsaved
+		save_state.tooltip_text = "Everything is saved." if unsaved == 0 else "%d file%s changed. Choose to write them to the pack (Ctrl+S)." % [unsaved, "" if unsaved == 1 else "s"]
+		save_state.theme_type_variation = "" if unsaved == 0 else "PrimaryButton"
+	if toast_undo != null and workspace.history.cursor == 0: toast_undo.hide()
 
 func _undo() -> void:
 	if not _entries_ready(): return
@@ -1637,7 +1818,7 @@ func _redo() -> void:
 func _after_history(label: String) -> void:
 	if not selected.is_empty(): selected = workspace.find_row(selected.doc.path, selected.def.type, selected.def.id, selected.def.mode, selected.get("ordinal", 0))
 	_refresh_all()
-	_set_status(label)
+	_set_status(label + ".", label.begins_with("Redid"))
 
 func _navigate(index: int) -> void:
 	if not _entries_ready(): return
@@ -1645,8 +1826,9 @@ func _navigate(index: int) -> void:
 	tabs.current_tab = index
 	if index == 6:
 		home.refresh(workspace)
-		heading.text = "Your pack"
+		heading.text = "Home"
 		detail.text = "Start a task, continue writing, or check your work."
+	_refresh_crumbs()
 
 func _start_task(template: Dictionary) -> void:
 	if _entries_ready(): wizard.open(workspace, template)

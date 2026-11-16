@@ -17,9 +17,11 @@ static func available(workspace: PackWorkspace, include_game: bool = false) -> A
 	return result
 
 static func load_template(path: String, family: String = "generic") -> Dictionary:
-	var data := {"id": path.get_file().get_basename(), "title": "", "family": family, "questions": [], "source": ""}
+	var data := {"id": path.get_file().get_basename(), "title": "", "about": "", "kind": "", "family": family, "questions": [], "source": ""}
 	for line: String in FileAccess.get_file_as_string(path).split("\n"):
 		if line.begins_with("// title: "): data.title = line.trim_prefix("// title: ")
+		elif line.begins_with("// about: "): data.about = line.trim_prefix("// about: ")
+		elif line.begins_with("// kind: "): data.kind = line.trim_prefix("// kind: ")
 		elif line.begins_with("// question: "):
 			var parts := line.trim_prefix("// question: ").split("|")
 			if parts.size() == 4: data.questions.append({"key": parts[0], "label": parts[1], "kind": parts[2], "default": parts[3]})
@@ -68,7 +70,7 @@ static func fill(template: Dictionary, answers: Dictionary, workspace: PackWorks
 		lines.append(line)
 	var text := "\n".join(lines)
 	if "{{" in text: return {"error": "The template has an unanswered question."}
-	return {"text": text, "id": values.id, "type": kind}
+	return {"text": text, "id": values.id, "type": kind, "name": str(values.get("name", ""))}
 
 static func create(template: Dictionary, answers: Dictionary, workspace: PackWorkspace) -> Dictionary:
 	var filled := fill(template, answers, workspace)

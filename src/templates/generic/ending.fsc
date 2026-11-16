@@ -1,4 +1,6 @@
 // title: Write an ending
+// about: How the game can end, and when.
+// kind: ending
 // question: name|Name|name|
 // question: opening|Ending text|prose|A new chapter awaits.
 == ending {{id}}
