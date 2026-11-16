@@ -576,6 +576,19 @@ func _add_field(key: String, kind: String) -> void:
 	if d.type == "item" and key == "infectious":
 		_add_item_form()
 		return
+	if d.type == "hook" and key == "on":
+		_add_hook_moment(value)
+		return
+	if d.type == "hook" and key == "while incapacitated" and value in ["", "skip"]:
+		var skip := CheckButton.new()
+		skip.text = "Skip this hook while the player is in a fight"
+		skip.button_pressed = value == "skip"
+		skip.disabled = not doc.writable
+		skip.toggled.connect(func(on: bool) -> void:
+			if on: _set_value(key, "skip")
+			else: _clear_item_field(key))
+		body.add_child(skip)
+		return
 	if is_condition_field(d.type, key) and (field == null or field.children.is_empty()) and (value.is_empty() or not Condition.compile(value).has("error")):
 		_add_condition_field(key, value)
 		return
@@ -723,6 +736,58 @@ func _add_field(key: String, kind: String) -> void:
 		choose.disabled = not doc.writable
 		choose.pressed.connect(_open_reference.bind(key))
 		line.add_child(choose)
+
+const MOMENT_WORDS := {"each turn": "Every turn", "day starts": "When day starts", "night starts": "When night starts", "captivity starts": "When a captivity starts", "captivity round": "Each round of a captivity", "after sex": "After sex", "player hits": "When the player hits in a fight", "after resting": "After resting", "instead of resting": "Instead of resting", "game starts": "When the game starts", "while travelling": "While travelling", "instead of talking to ": "Instead of talking to…", "instead of sex with ": "Instead of sex with…", "after using ": "After using the item…"}
+
+## When a hook runs: one of the engine's moments, some about one character or item.
+func _add_hook_moment(value: String) -> void:
+	var writable: bool = row.doc.writable
+	var line := HBoxContainer.new()
+	body.add_child(line)
+	var moments: Array = Game.HOOK_MOMENTS + Game.HOOK_CHARACTER_MOMENTS + Game.HOOK_ITEM_MOMENTS
+	var current := ""
+	for moment: String in moments:
+		if value == moment or (moment.ends_with(" ") and value.begins_with(moment)): current = moment
+	var list := OptionButton.new()
+	list.add_item("Choose when this happens…")
+	list.set_item_disabled(0, true)
+	for moment: String in moments: list.add_item(MOMENT_WORDS.get(moment, moment.capitalize()))
+	list.select(moments.find(current) + 1)
+	list.disabled = not writable
+	line.add_child(list)
+	var about := value.substr(current.length()) if current.ends_with(" ") else ""
+	# Shared by the two controls: a lambda keeps its own copy of plain values.
+	var state := {"moment": current, "kind": "item" if current in Game.HOOK_ITEM_MOMENTS else "character"}
+	var target := PickerButton.new()
+	target.placeholder = "Choose the " + str(state.kind) + "…"
+	target.text = target.placeholder
+	target.workspace = workspace
+	target.drop_kinds = [state.kind]
+	target.visible = current.ends_with(" ")
+	target.disabled = not writable
+	target.options = func() -> Array:
+		var result: Array = []
+		for other: Dictionary in workspace.rows:
+			if other.def.type == state.kind and other.def.mode != "extend": result.append({"value": other.def.id, "label": Wording.title(other), "detail": "" if other.doc.writable else str(other.pack)})
+		return result
+	target.set_value(about)
+	line.add_child(target)
+	list.item_selected.connect(func(index: int) -> void:
+		var moment: String = moments[index - 1]
+		if not moment.ends_with(" "): _set_value("on", moment)
+		else:
+			# A moment about one character or item is written once that is chosen.
+			state.kind = "item" if moment in Game.HOOK_ITEM_MOMENTS else "character"
+			state.moment = moment
+			target.placeholder = "Choose the " + str(state.kind) + "…"
+			target.drop_kinds = [state.kind]
+			target.set_value("")
+			target.show()
+			target.open())
+	target.picked.connect(func(id: String) -> void:
+		if id.is_empty(): return
+		if _set_value("on", str(state.moment) + id): workspace.require_content(str(state.kind), id))
+	if value.is_empty() or current.is_empty(): _event_note("Choose when this hook runs." if value.is_empty() else "Kept as written: " + value)
 
 ## Fields that hold a condition: "when", "requires" and everything ending in "when".
 static func is_condition_field(type: String, key: String) -> bool:
