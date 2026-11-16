@@ -26,6 +26,15 @@ Standalone Godot 4.7 desktop authoring tool for MAGE packs. Authors build all pa
 | `templates.gd`, `templates/`, `task_wizard.gd`, `pack_home.gd` | Guided tasks as data: `.fsc` with `{{placeholders}}` and a header of pages and questions. Game templates show only with the `core-mechanics` pack loaded and hold no story text. |
 | `playtest.gd` | Starts the real game (the engine checkout in `MAGE_ENGINE_PATH`, set by `launch.py`) with `--only-packs --packs … --data …` on the working pack, or on a copy that holds the unsaved buffers, and the reference packs in place. Never point the game at the player's saves, and never write into a pack to try it. |
 | `content_tools.gd`, `content_actions.gd` | Rename everywhere (prose untouched, taken back if it would break references), duplicate, delete with its consequences, where-used, the quest view. `ContentTools.map_code` decides which parts of a line hold IDs; rename and the uses index share it. |
-| `main.gd`, `command_palette.gd`, `drop_menu.gd`, `drag_payload.gd`, `editor_theme.gd`, `editor_prefs.gd`, `wording.gd` | The window (top bar, library, Home / Stories / Map / Details, side editor, status line), Find anything, drops, themes and category colours, remembered settings, the wording table. |
+| `main.gd`, `content_library.gd`, `command_palette.gd`, `drop_menu.gd`, `drag_payload.gd`, `editor_theme.gd`, `editor_prefs.gd`, `wording.gd` | The window (top bar, library, Home / Stories / Map / Details, side editor, status line), the library tree (an entry opens when the pointer is let go in place, so it can be dragged), Find anything, drops, themes and category colours, remembered settings, the wording table. |
+
+## Large workspaces
+
+Authors of a big game load dozens of packs beside their own. Keep every refresh proportional to the working pack:
+
+- A file is parsed once (`PackDocument.parsed()`); the other packs' rows, story links and names are worked out once and kept. Never loop over every loaded file on each change.
+- The engine's loader changes parsed definitions in place when it applies `== extend` blocks. `PackWorkspace.preview_content()` therefore gives it copies of extended and extending definitions; anything else that hands parsed definitions to engine code must do the same.
+- Above `PackWorkspace.HEAVY` definitions the full engine check runs only on request; edits get `check_working()`, and the preview waits to be asked.
+- Text with a symbol the interface font lacks is slow to build unless the theme names a fallback (`EditorTheme.symbol_fonts()`), and fallbacks raise line heights unless trimmed (`EditorTheme.font()`). Use symbols those fonts hold.
 
 The product documentation must say plainly what is not finished. Run `./run.sh --engine /path/to/MAGE`.

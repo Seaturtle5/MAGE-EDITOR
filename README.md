@@ -21,13 +21,15 @@ The editor uses the engine's own reader and checker from that checkout, without 
 | Where | What |
 |---|---|
 | Top bar | **Pack** (new, open, add another pack, import a picture), **Undo / Redo**, **Find anything** (Ctrl+K), **Create**, **Play**, the check result, and **Save**. The gear holds appearance, interface size and the technical views. |
-| Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. |
+| Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. **Pack → Add another pack** takes one pack or a whole folder of packs. |
 | Home | Guided tasks, what you worked on with hints about what it still needs, and problems. |
 | Stories | The board: one card per story, with lines showing how they lead to each other. Select a card to see its blocks in the side editor. **Tidy up** arranges the cards. |
-| Map | Places and the paths between them; what happens at each place. |
-| Details | Everything about the selected content. The small buttons beside its name show where it is used, rename it everywhere, duplicate it and delete it. |
+| Map | Places and the ways between them. Drag from one place to another to connect them, with or without a door. Select a place to set its area (what is found while exploring) and its region, to add a door to a way, and to see what happens there. **Arrange as in the game** lays the places out as the game's own map does. |
+| Details | Everything about the selected content. Conditions read in words and open the condition builder; lists of words are chips; numbers, switches and choices have their own controls. The small buttons beside the name show where the content is used, rename it everywhere, duplicate it and delete it. |
 | Side editor (right) | The selected story as blocks, with a preview underneath. |
 | Status line | What just happened, with **Undo**, and where you are. |
+
+**‹ ›** beside Home go back and forward through what you looked at (Alt+← / Alt+→). The **☰** button opens the lists of saved values and problems: choose a value to see every story that changes it and every story that reads it.
 
 ## Guided tasks
 
@@ -55,6 +57,16 @@ Some actions only work in certain stories (a fight action, "keep the item"). The
 
 The game is taken from the engine checkout the editor was started with (`--engine`).
 
+## Finding and changing across the pack
+
+| To | Use |
+|---|---|
+| Jump anywhere | **Find anything** (Ctrl+K): content by name, your own stories by their text, values and commands. |
+| Change a word in the story text | **Pack → Find and replace in story text** (Ctrl+H). Only the words players read are searched; every line is listed before anything changes. |
+| See what moves a quest | Open the quest and choose **What moves it?**: each stage with the stories that set it, and a button to set it from another story. |
+| See how packs depend on each other | **Pack → How the packs depend on each other**. |
+| Go back in time | **Pack → History of changes** lists every change; choose one to go back to just after it. |
+
 ## Safety
 
 - Every change is one step in Undo, named after what it did. Save is separate and explicit.
@@ -65,9 +77,9 @@ The game is taken from the engine checkout the editor was started with (`--engin
 
 ## Not finished
 
-- Settings of the rarer content types (most rules, nested settings such as equipment or body parts) are typed in the format's words in a text box.
+- Nested settings (equipment, weapons, body parts, modifiers, shop stock, creature variants) and some settings of the rarer rules types are typed in the format's words in a text box. A small ▾ beside such a box offers the words other content of the same kind uses.
 - A calculation is typed as a short formula inside its block; lists of entries are typed with commas.
-- The map does not edit doors, regions or map positions.
+- The map does not set travel order, map grids or hand-set map positions; a door that leads into an area is set in the door's details.
 - Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.
-- There is no find and replace, and no view of how packs depend on each other.
-- The Details forms still use an older design than the side editor.
+- With very many packs loaded (several thousand pieces of content), the full check runs when you choose it and the preview updates when you ask, so that writing stays quick.
+- The Details pages still use an older design than the side editor; conditions of events and reactions of items there are chosen from an older list.
