@@ -50,7 +50,7 @@ const HELP := {
 	"priority": ["Arrival priority", "Lower values are checked first.", "Story rules"],
 	"outcomes": ["Event outcomes", "Named results the event's story can record.", "Story rules"],
 	"stages": ["Stages", "Named quest stages or thresholds for this content.", "Story rules"],
-	"done at": ["Completed stages", "Quest stages that count as finished.", "Story rules"]
+	"done at": ["Finished at", "The stage at which the quest counts as finished.", "Story rules"]
 }
 const INTERACTIONS := {
 	"use": ["Use story", "When the player eats, drinks or uses this item. Restore health, satisfy hunger, quench thirst or add mutation and choices here."],

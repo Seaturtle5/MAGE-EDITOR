@@ -469,6 +469,31 @@ func arrange_like_game() -> void:
 	refresh()
 	_fit_places.call_deferred()
 
+## Asks for a door's name and lock, then puts the door on a way that exists.
+func _ask_door(place: Dictionary, exit: Dictionary) -> void:
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "A door on the way " + str(exit.direction)
+	dialog.ok_button_text = "Add the door"
+	var form := VBoxContainer.new()
+	form.custom_minimum_size.x = 340
+	dialog.add_child(form)
+	var name_input := LineEdit.new()
+	name_input.placeholder_text = "Name of the door"
+	form.add_child(name_input)
+	var locked := CheckButton.new()
+	locked.text = "Locked at first (a story unlocks it)"
+	form.add_child(locked)
+	dialog.register_text_enter(name_input)
+	dialog.confirmed.connect(func() -> void:
+		var error := workspace.add_door(str(place.def.id), str(exit.direction), name_input.text, locked.button_pressed)
+		if not error.is_empty(): problem.emit(error)
+		else: changed.emit(workspace.find_row(place.doc.path, "location", place.def.id, place.def.mode, place.get("ordinal", 0)))
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+	name_input.grab_focus()
+
 ## A picker for the area or region of a place, with a way to make a new one.
 func _place_setting(place: Dictionary, key: String, type: String, caption: String, none: String) -> void:
 	_inspector_label(caption, inspector, 13)
@@ -561,6 +586,16 @@ func _render_inspector() -> void:
 	for exit: Dictionary in exits_by_place.get(inspected_id, []):
 		var named := RegEx.create_from_string("\\bdoor ([a-z0-9_]+)").search(str(exit.text))
 		if named != null: doors[named.get_string(1)] = str(exit.direction)
+	# A way out without a door can get one: both sides of the way are changed.
+	for exit: Dictionary in exits_by_place.get(inspected_id, []):
+		if "door " in str(exit.text) or not exit.row.doc.writable or not places_by_id.has(str(exit.target)): continue
+		var add_door := Button.new()
+		add_door.theme_type_variation = "AddRow"
+		add_door.text = "+ Door on the way %s to %s" % [str(exit.direction), _title(places_by_id[str(exit.target)])]
+		add_door.tooltip_text = "Make a door for this way. It is added on both sides."
+		add_door.clip_text = true
+		add_door.pressed.connect(func() -> void: _ask_door(place, exit))
+		inspector.add_child(add_door)
 	if not doors.is_empty(): _inspector_label("DOORS", inspector, 13)
 	for id: String in doors:
 		for row: Dictionary in workspace.rows:

@@ -12,7 +12,7 @@ const REFERENCES := {
 	"lives at": ["location"], "start": ["location"], "region": ["region"], "zone": ["zone"],
 	"form": ["form"], "purified": ["item"], "image": ["image"], "logo": ["image"], "background": ["image"],
 	"run by": ["character"], "found in": ["zone"], "items": ["item"], "at": ["location"],
-	"trades for": ["item"], "generic": ["event"]
+	"trades for": ["item"], "generic": ["event"], "leads to zone": ["zone"], "milk item": ["item"], "cum item": ["item"]
 }
 const PRIMARY_FIELDS := ["name", "description", "pronouns", "image", "lives at", "found by", "repeat", "requires", "chance", "cooldown", "priority", "category", "weight", "level", "hp", "damage", "zone", "start"]
 const SWITCH_FIELDS := {
@@ -28,7 +28,8 @@ const SWITCH_FIELDS := {
 }
 const CHOICE_FIELDS := {
 	"event": {"repeat": ["once", "until resolved", "always"]},
-	"creature": {"active": ["always", "day", "night"], "gender": Validator.CREATURE_GENDERS}
+	"creature": {"active": ["always", "day", "night"], "gender": Validator.CREATURE_GENDERS, "strike with": CombatSystem.ATTRIBUTES},
+	"character": {"pronouns": ["he", "she", "they", "it", "by body"]}
 }
 const NUMBER_FIELDS := {
 	"item": ["weight"],
@@ -47,7 +48,7 @@ const NUMBER_FIELDS := {
 	"form": ["libido"]
 }
 ## Lists of short words shown as chips; the value names where suggestions come from.
-const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": ""}
+const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": "", "outcomes": ""}
 
 var workspace: PackWorkspace
 var row: Dictionary = {}
@@ -595,6 +596,24 @@ func _add_field(key: String, kind: String) -> void:
 	if CHIP_FIELDS.has(key) and (field == null or field.children.is_empty()):
 		_add_chip_field(key, value)
 		return
+	if d.type == "quest" and key == "done at":
+		# The stage that finishes the quest, chosen from its own stages.
+		var stage := PickerButton.new()
+		stage.placeholder = "Choose the stage that finishes the quest…"
+		stage.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		stage.disabled = not doc.writable
+		stage.options = func() -> Array:
+			var result: Array = []
+			for name: String in workspace.preview_content().quests.get(d.id, {}).get("stages", []): result.append({"value": name, "label": name.replace("_", " ")})
+			return result
+		stage.set_value(value)
+		stage.picked.connect(func(name: String) -> void:
+			if not name.is_empty(): _set_value(key, name))
+		body.add_child(stage)
+		return
+	if key == "stats" and (field == null or field.children.is_empty()) and (value.is_empty() or not _read_stats(value).is_empty()):
+		_add_stats_field(key, value)
+		return
 	if d.type == "item" and key == "use action":
 		var activity := OptionButton.new()
 		var activities := ["", "rest", "wait", "explore", "scavenge"]
@@ -723,6 +742,29 @@ func _add_field(key: String, kind: String) -> void:
 	input.focus_exited.connect(_save_line.bind(key, input))
 	input.text_submitted.connect(func(_v: String) -> void: input.release_focus())
 	line.add_child(input)
+	if kind == "text" and not REFERENCES.has(key) and doc.writable:
+		# What other content of this kind has here: a word to pick instead of remembering it.
+		var used := PickerButton.new()
+		used.placeholder = "▾"
+		used.text = "▾"
+		used.theme_type_variation = "Ghost"
+		used.tooltip_text = "Pick a value that other %s use here." % Wording.plural(d.type).to_lower()
+		used.options = func() -> Array:
+			var counts: Dictionary = {}
+			for other: Dictionary in workspace.rows:
+				if other.def.type != d.type or not other.def.fields.has(key): continue
+				var seen: String = other.def.fields[key].value
+				if seen.is_empty() or seen.length() > 40 or not other.def.fields[key].children.is_empty(): continue
+				counts[seen] = int(counts.get(seen, 0)) + 1
+			var values: Array = counts.keys()
+			values.sort_custom(func(a: String, b: String) -> bool: return counts[a] > counts[b])
+			var result: Array = []
+			for seen: String in values.slice(0, 60): result.append({"value": seen, "label": seen, "detail": "used %d time%s" % [counts[seen], "" if counts[seen] == 1 else "s"]})
+			return result
+		used.label_for = func(_value: String) -> String: return "▾"
+		used.picked.connect(func(chosen: String) -> void:
+			if not chosen.is_empty(): _set_value(key, chosen))
+		line.add_child(used)
 	if REFERENCES.has(key) or (d.type == "item" and key == "infectious"):
 		var choose := ReferenceButton.new()
 		choose.workspace = workspace
@@ -788,6 +830,42 @@ func _add_hook_moment(value: String) -> void:
 		if id.is_empty(): return
 		if _set_value("on", str(state.moment) + id): workspace.require_content(str(state.kind), id))
 	if value.is_empty() or current.is_empty(): _event_note("Choose when this hook runs." if value.is_empty() else "Kept as written: " + value)
+
+## "strength 12, dexterity 10" as {strength: 12, dexterity: 10}; empty when it is written another way.
+static func _read_stats(value: String) -> Dictionary:
+	var stats: Dictionary = {}
+	for part: String in value.split(",", false):
+		var words := part.strip_edges().split(" ", false)
+		if words.size() != 2 or words[0] not in CombatSystem.ATTRIBUTES or not words[1].is_valid_int(): return {}
+		stats[words[0]] = int(words[1])
+	return stats
+
+## The six attributes as number boxes.
+func _add_stats_field(key: String, value: String) -> void:
+	var stats := _read_stats(value)
+	var grid := GridContainer.new()
+	grid.columns = 6
+	body.add_child(grid)
+	var boxes: Dictionary = {}
+	var save := func() -> void:
+		var parts: Array[String] = []
+		for name: String in CombatSystem.ATTRIBUTES: parts.append("%s %d" % [name, int(boxes[name].value)])
+		_set_value(key, ", ".join(parts))
+	for name: String in CombatSystem.ATTRIBUTES:
+		var cell := VBoxContainer.new()
+		grid.add_child(cell)
+		var caption := AuthoringLayout.label(str(name).capitalize(), 12, true)
+		caption.autowrap_mode = TextServer.AUTOWRAP_OFF
+		cell.add_child(caption)
+		var box := SpinBox.new()
+		box.min_value = 0
+		box.max_value = 999
+		box.value = int(stats.get(name, 10))
+		box.editable = row.doc.writable
+		box.value_changed.connect(func(_number: float) -> void: save.call())
+		boxes[name] = box
+		cell.add_child(box)
+	if value.is_empty(): _event_note("Not set yet: changing a number sets all six.")
 
 ## Fields that hold a condition: "when", "requires" and everything ending in "when".
 static func is_condition_field(type: String, key: String) -> bool:
@@ -858,7 +936,7 @@ func _add_chip_field(key: String, value: String) -> void:
 			if word not in entries: result.append({"value": word, "label": word.replace("_", " ")})
 		return result
 	add.picked.connect(func(word: String) -> void:
-		var clean := word.strip_edges().to_lower()
+		var clean := word.strip_edges().to_lower().replace(" ", "_") if key in ["outcomes", "tags", "gift tags"] else word.strip_edges().to_lower()
 		if clean.is_empty() or clean in entries or "," in clean: return
 		_set_value(key, ", ".join(entries + [clean])))
 	flow.add_child(add)

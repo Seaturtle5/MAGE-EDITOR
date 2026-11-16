@@ -563,6 +563,37 @@ func require_condition(condition: Dictionary) -> String:
 	elif condition.get("op") == "quest": error = require_content("quest", condition.quest)
 	return error
 
+## Puts a new door on a way out that exists, and on the way back if there is one.
+func add_door(place: String, direction: String, name: String, locked: bool) -> String:
+	if name.strip_edges().is_empty(): return "Give the door a name."
+	return transaction("Add the door " + name.strip_edges(), func() -> String:
+		var door_id := unique_id(name, "door")
+		var made := create_definition("door", door_id, "define", "name: " + name.strip_edges() + "\nlocked: " + ("yes\nlocked text: It is locked." if locked else "no"))
+		if not made.is_empty(): return made
+		var target := ""
+		var changed := 0
+		# The way out, then the way back from where it leads.
+		for step in 2:
+			var from := place if step == 0 else target
+			var to := "" if step == 0 else place
+			if from.is_empty(): break
+			for row: Dictionary in rows:
+				if not row.doc.writable or row.def.type != "location" or row.def.id != from or not row.def.fields.has("exits"): continue
+				var lines := StoryGraph._lines(row.doc)
+				for line: FscParser.Line in row.def.fields.exits.children:
+					var parts := line.text.split(":", true, 1)
+					if parts.size() != 2 or "door " in parts[1]: continue
+					var leads := SceneRunner.exit_target(parts[1].strip_edges())
+					if (step == 0 and parts[0].strip_edges() != direction) or (step == 1 and leads != to): continue
+					var value := parts[1].strip_edges()
+					var one_way := value.ends_with(", one way")
+					StoryGraph._replace_line(lines, line.number - 1, StoryGraph._indent(lines[line.number - 1]) + parts[0].strip_edges() + ": " + value.trim_suffix(", one way") + ", door " + door_id + (", one way" if one_way else ""))
+					if step == 0: target = leads
+					changed += 1
+					break
+				StoryGraph._save_lines(row.doc, lines)
+		return "" if changed > 0 else "This way out is no longer there, or belongs to another pack.")
+
 ## Connects two places, both ways by default. With `door` (name, locked) a
 ## door is made for the way between them, in the same undo step.
 func connect_places(source: Dictionary, destination: Dictionary, direction: String, two_way: bool = true, door: Dictionary = {}) -> String:
