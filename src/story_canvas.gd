@@ -221,6 +221,7 @@ func refresh() -> void:
 		index += 1
 	context_label.text += " · %d cards" % graph_rows.size()
 	graph.minimap_enabled = graph_rows.size() > 6
+	_settle_cards.call_deferred()
 	var context_key := _row_key(context_row) if not context_row.is_empty() else ""
 	if context_key != shown_context:
 		shown_context = context_key
@@ -242,6 +243,15 @@ func refresh() -> void:
 			var call_target := StoryGraph.play_target(calls[i])
 			if destinations.has(call_target):
 				graph.connect_node(from_name, options.size() + (1 if has_continuation else 0) + i, destinations[call_target], 0)
+
+## Wrapping labels first measure too tall; each card takes its real height
+## once the board is laid out.
+func _settle_cards() -> void:
+	if not is_inside_tree(): return
+	await get_tree().process_frame
+	if graph == null: return
+	for child: Node in graph.get_children():
+		if child is GraphNode and not child.is_queued_for_deletion(): (child as GraphNode).reset_size()
 
 ## Brings the story in focus into view, once the board has its size.
 func _show_context() -> void:
@@ -367,10 +377,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 	if row.doc.writable and d.type in ["scene", "menu"] and not row.has("script_field") and workspace.uses(d.id).is_empty():
 		var hint := AuthoringLayout.label("⚠ Nothing leads here yet", 12, true)
 		card.add_child(hint)
-	# Wrapping labels first measure too tall; the card takes its real height once laid out.
-	card.reset_size.call_deferred()
-	get_tree().process_frame.connect(func() -> void:
-		if is_instance_valid(card): card.reset_size(), CONNECT_ONE_SHOT)
+
 
 func _build_card(card: GraphNode, row: Dictionary) -> void:
 	if not detailed_cards:
