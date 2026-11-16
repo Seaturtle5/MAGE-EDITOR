@@ -2,43 +2,29 @@ class_name PackDocument
 extends RefCounted
 ## Keep original bytes outside the exact range an author changes.
 
+signal changed(before: String)
+
 var path: String
 var original: String
 var text: String
 var writable: bool
 var existed_at_open: bool
-var undo_steps: Array[String] = []
-var redo_steps: Array[String] = []
 
 
 func _init(file_path: String, can_write: bool) -> void:
 	path = file_path
 	writable = can_write
 	existed_at_open = FileAccess.file_exists(path)
-	original = FileAccess.get_file_as_string(path)
+	original = FileAccess.get_file_as_string(path) if existed_at_open else ""
 	text = original
 
 
 func change(value: String) -> void:
 	if not writable or value == text:
 		return
-	undo_steps.append(text)
-	redo_steps.clear()
+	var before := text
 	text = value
-
-
-func undo() -> void:
-	if undo_steps.is_empty() or not writable:
-		return
-	redo_steps.append(text)
-	text = undo_steps.pop_back()
-
-
-func redo() -> void:
-	if redo_steps.is_empty() or not writable:
-		return
-	undo_steps.append(text)
-	text = redo_steps.pop_back()
+	changed.emit(before)
 
 
 func dirty() -> bool:

@@ -1,0 +1,14 @@
+// title: Make an item
+// question: name|Name|name|
+// question: description|Description|prose|A useful object.
+// question: category|Kind|choice:food,drink,other|food
+// question: hunger|Restore hunger by|number|10
+== item {{id}}
+name: {{name}}
+description:
+    {{description}}
+category: {{category}}
+weight: 1
+consumed: {{consumed}}
+use:
+    {{item_reaction}}

@@ -2,6 +2,123 @@ class_name StoryGraph
 extends RefCounted
 ## Source-aware story operations. Never reserialize a whole existing scene.
 
+static func structure(row: Dictionary) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if row.is_empty(): return result
+	var lines := _lines(row.doc)
+	var span: Vector2i = row.doc.block_range(row.def)
+	var end_line: int = row.doc.text.left(span.y).count("\n") + 2
+	if row.has("script_field") or row.def.type not in ["scene", "text", "menu"]:
+		var key: String = row.get("script_field", "play" if row.def.type == "event" else "talk")
+		if row.def.fields.has(key):
+			var field: FscParser.Field = row.def.fields[key]
+			end_line = field.children[-1].number + 1 if not field.children.is_empty() else field.line + 1
+	var roots := script_nodes(row).duplicate()
+	if row.def.type == "menu" and not row.has("script_field") and not row.def.options.is_empty():
+		roots.append({"kind": "choices", "line": row.def.options[0].line, "options": row.def.options})
+	_structure_nodes(roots, end_line, "", lines, result)
+	return result
+
+static func _structure_nodes(nodes: Array, limit: int, parent: String, lines: PackedStringArray, result: Array[Dictionary]) -> void:
+	for index in nodes.size():
+		var node: Dictionary = nodes[index]
+		var end: int = nodes[index + 1].line if index + 1 < nodes.size() else limit
+		var first := int(node.line)
+		if first < 1 or first > lines.size(): continue
+		while end > first + 1 and end - 2 < lines.size() and (lines[end - 2].strip_edges().is_empty() or lines[end - 2].strip_edges().begins_with("//")): end -= 1
+		var entry := {"node": node, "line": first, "end_line": mini(end, lines.size() + 1), "indent": _indent(lines[first - 1]), "parent": parent, "key": str(node.kind) + ":" + str(first)}
+		result.append(entry)
+		match str(node.kind):
+			"choices":
+				var options: Array = []
+				for option: Dictionary in node.options:
+					var response := option.duplicate()
+					response.kind = "response"
+					options.append(response)
+				_structure_nodes(options, end, entry.key, lines, result)
+			"response": _structure_nodes(node.body, end, entry.key, lines, result)
+			"if":
+				var branches: Array = []
+				for branch: Dictionary in node.branches:
+					var item := branch.duplicate()
+					item.kind = "branch"
+					branches.append(item)
+				if node["else"] is Array:
+					for at in range(first, mini(end - 1, lines.size())):
+						if _indent(lines[at]) == entry.indent and lines[at].strip_edges() == "else:": branches.append({"kind": "branch", "line": at + 1, "condition": "", "body": node["else"]})
+				_structure_nodes(branches, end, entry.key, lines, result)
+			"branch", "outcome": _structure_nodes(node.body, end, entry.key, lines, result)
+			"fight":
+				var outcomes: Array = []
+				for at in range(first, mini(end - 1, lines.size())):
+					var label := lines[at].strip_edges().trim_suffix(":")
+					if _indent(lines[at]) == str(entry.indent) + "    " and label in node.outcomes:
+						outcomes.append({"kind": "outcome", "line": at + 1, "label": label, "body": node.outcomes[label]})
+				_structure_nodes(outcomes, end, entry.key, lines, result)
+
+static func node_span(row: Dictionary, line: int, kind: String = "") -> Dictionary:
+	for entry: Dictionary in structure(row):
+		if entry.line == line and (kind.is_empty() or entry.node.kind == kind): return entry
+	return {}
+
+static func insert_block(row: Dictionary, before_line: int, indent: String, content: String, snapshot: String) -> String:
+	if not row.doc.writable: return "This pack is read-only."
+	if row.doc.text != snapshot: return "This story changed. Reopen it before editing."
+	var lines := _lines(row.doc)
+	if before_line < 1 or before_line > lines.size() + 1: return "Choose an insertion point in this story."
+	var def_span: Vector2i = row.doc.block_range(row.def)
+	var end_line: int = row.doc.text.left(def_span.y).count("\n") + 2
+	if before_line <= int(row.def.line) or before_line > end_line: return "The insertion point is outside this content."
+	var parsed := FscParser.parse("== scene block_draft\n" + content + "\n")
+	if not parsed.ok() or parsed.definitions.size() != 1: return "The pasted blocks are not a complete story block."
+	var program := Program.compile("block_draft", parsed.definitions[0].nodes)
+	if not program.errors.is_empty(): return str(program.errors[0].message)
+	var replacement := content.trim_suffix("\n").split("\n")
+	for index in range(replacement.size() - 1, -1, -1): _insert_line(row.doc, lines, before_line - 1, indent + replacement[index])
+	_save_lines(row.doc, lines)
+	return ""
+
+static func remove_block(row: Dictionary, entry: Dictionary, snapshot: String) -> String:
+	if not row.doc.writable: return "This pack is read-only."
+	if row.doc.text != snapshot: return "This story changed. Reopen it before editing."
+	if entry.is_empty() or entry.node.get("inline_field", "") != "" or entry.node.kind in ["branch", "outcome", "choices"]: return "This container must be kept with its surrounding story."
+	var lines := _lines(row.doc)
+	for index in range(int(entry.line) - 1, int(entry.end_line) - 1):
+		if lines[index].strip_edges().begins_with("//"): return "This block contains comments. Move it or keep it to preserve them."
+	for index in range(int(entry.end_line) - 2, int(entry.line) - 2, -1): lines.remove_at(index)
+	_save_lines(row.doc, lines)
+	return ""
+
+static func move_block(row: Dictionary, entry: Dictionary, before_line: int, indent: String, snapshot: String, copy: bool = false) -> String:
+	if not row.doc.writable: return "This pack is read-only."
+	if row.doc.text != snapshot: return "This story changed. Reopen it before editing."
+	if entry.is_empty() or entry.node.get("inline_field", "") != "" or entry.node.kind in ["branch", "outcome", "choices"]: return "Move the whole condition, fight or response instead."
+	if before_line >= int(entry.line) and before_line < int(entry.end_line): return "A block cannot be moved inside itself."
+	var lines := _lines(row.doc)
+	var payload: Array[String] = []
+	for index in range(int(entry.line) - 1, int(entry.end_line) - 1):
+		if not lines[index].is_empty() and not lines[index].begins_with(str(entry.indent)): return "This block has mixed indentation and is kept."
+		payload.append(lines[index].trim_prefix(str(entry.indent)).trim_suffix("\r"))
+	var old: String = row.doc.text
+	if not copy:
+		for index in range(int(entry.end_line) - 2, int(entry.line) - 2, -1): lines.remove_at(index)
+		if before_line >= int(entry.end_line): before_line -= int(entry.end_line) - int(entry.line)
+		_save_lines(row.doc, lines)
+	var error := insert_block(row, before_line, indent, "\n".join(payload), row.doc.text)
+	if not error.is_empty(): row.doc.text = old
+	return error
+
+static func wrap_in_condition(row: Dictionary, entry: Dictionary, condition: String, snapshot: String) -> String:
+	if not row.doc.writable: return "This pack is read-only."
+	if row.doc.text != snapshot: return "This story changed. Reopen it before editing."
+	if Condition.compile(condition).has("error"): return "Choose a supported condition."
+	if entry.is_empty() or entry.node.kind in ["branch", "outcome", "choices"] or entry.node.has("inline_field"): return "Choose a whole block to wrap."
+	var lines := _lines(row.doc)
+	for index in range(int(entry.line) - 1, int(entry.end_line) - 1): _replace_line(lines, index, "    " + lines[index].trim_suffix("\r"))
+	_insert_line(row.doc, lines, int(entry.line) - 1, str(entry.indent) + "if " + condition + ":")
+	_save_lines(row.doc, lines)
+	return ""
+
 static func script_nodes(row: Dictionary) -> Array:
 	var d: FscParser.Definition = row.def
 	if d.type == "scene" and not row.has("script_field"):

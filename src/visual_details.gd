@@ -685,7 +685,14 @@ func _add_field(key: String, kind: String) -> void:
 	input.text_submitted.connect(func(_v: String) -> void: input.release_focus())
 	line.add_child(input)
 	if REFERENCES.has(key) or (d.type == "item" and key == "infectious"):
-		var choose := Button.new()
+		var choose := ReferenceButton.new()
+		choose.workspace = workspace
+		choose.kinds = ["form"] if key == "infectious" else REFERENCES[key]
+		var original := doc.text
+		choose.content_dropped.connect(func(data: Dictionary) -> void:
+			var candidate := DragPayload.resolve(workspace, data)
+			if candidate.is_empty(): return
+			_assign_reference(key, candidate, original))
 		choose.text = "Choose…"
 		choose.disabled = not doc.writable
 		choose.pressed.connect(_open_reference.bind(key))
@@ -969,18 +976,41 @@ func _apply_reference() -> void:
 	if indexes.is_empty():
 		return
 	var candidate: Dictionary = picker_list.get_item_metadata(indexes[0])
-	var value: String = candidate.def.id
-	var kind: String = ContentDB.SCHEMA.get(row.def.type, {}).get(picker_field, "")
-	if kind == "list":
-		var previous: String = row.doc.field_value(row.def, picker_field)
-		if not previous.is_empty() and value not in previous.split(","):
-			value = previous + ", " + value
-	if not _set_value(picker_field, value):
+	_assign_reference(picker_field, candidate, row.doc.text)
+
+func _assign_reference(key: String, candidate: Dictionary, expected: String) -> void:
+	if pending_rows:
+		problem.emit("Apply or discard your edited entries first.")
 		return
-	if candidate.root != workspace.target:
-		var error := workspace.add_requirement(candidate.pack)
-		if not error.is_empty():
-			problem.emit("Add the reference pack as a dependency: " + error)
+	var current := _current_row()
+	if current.is_empty() or current.doc.text != expected:
+		problem.emit("This content changed. Choose its reference again.")
+		return
+	var value: String = candidate.def.id
+	var kind: String = ContentDB.SCHEMA.get(current.def.type, {}).get(key, "")
+	if kind == "list":
+		var previous: String = current.doc.field_value(current.def, key)
+		if "\n" in previous:
+			problem.emit("This reference list has nested source which is kept.")
+			return
+		var ids: Array[String] = []
+		for id: String in previous.split(",", false): ids.append(id.strip_edges())
+		if value not in ids: ids.append(value)
+		value = ", ".join(ids)
+	var error := workspace.transaction("Choose " + key + " for " + Wording.title(current), func() -> String:
+		var issue: String = current.doc.set_field(current.def, key, value)
+		if not issue.is_empty(): return issue
+		if current.def.type == "item" and key == "infectious" and not current.def.fields.has("use") and not current.def.fields.has("use action"):
+			workspace.reindex()
+			var fresh := workspace.find_row(current.doc.path, current.def.type, current.def.id, current.def.mode)
+			issue = fresh.doc.set_field(fresh.def, "use", "", true)
+			if not issue.is_empty(): return issue
+		if candidate.root != workspace.target: return workspace.add_requirement(candidate.pack)
+		return "")
+	if not error.is_empty():
+		problem.emit(error)
+		return
+	changed.emit(workspace.find_row(current.doc.path, current.def.type, current.def.id, current.def.mode, current.get("ordinal", 0)))
 
 func _mark_rows(section: String) -> void:
 	pending_sections[section] = true

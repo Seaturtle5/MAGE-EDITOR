@@ -76,11 +76,40 @@ var background: ColorRect
 var theme_picker: OptionButton
 var new_triggers: EventTriggers
 
+var story_editor: StoryEditor
+var home: PackHome
+var wizard: TaskWizard
+var palette: CommandPalette
+var drafts := DraftAutosave.new()
+var recovery_dialog: ConfirmationDialog
+var recovery_pending := false
+var undo_button: Button
+var redo_button: Button
+var save_state: Label
+var tour: AcceptDialog
+var tour_step := 0
+var tour_text: Label
+var import_queue: Array[String] = []
+var drops: ContentDropMenu
+var navigation: HBoxContainer
+
 func _ready() -> void:
 	get_window().title = "MAGE:EDITOR"
 	get_tree().auto_accept_quit = false
 	_build_theme()
 	_build_ui()
+	_build_workflow()
+	workspace.history.changed.connect(_history_changed)
+	get_window().files_dropped.connect(_files_dropped)
+	var timer := Timer.new()
+	timer.wait_time = 30
+	timer.timeout.connect(_autosave)
+	add_child(timer)
+	timer.start()
+	var saved_pack := str(_preference("workspace", "last_pack", ""))
+	if not saved_pack.is_empty() and FileAccess.file_exists(saved_pack.path_join("pack.fsc")):
+		_open_target(saved_pack)
+		return
 	var example := ProjectSettings.globalize_path("res://example-pack")
 	if FileAccess.file_exists(example.path_join("pack.fsc")):
 		var working := OS.get_user_data_dir().path_join("packs/example-adventure")
@@ -138,7 +167,7 @@ func _build_ui() -> void:
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 10)
 	margin.add_child(root)
-	var bar := HBoxContainer.new()
+	var bar := HFlowContainer.new()
 	bar.add_theme_constant_override("separation", 8)
 	root.add_child(bar)
 	bar.add_child(_label("MAGE", 23))
@@ -146,6 +175,11 @@ func _build_ui() -> void:
 	subtitle.theme_type_variation = "AccentLabel"
 	bar.add_child(subtitle)
 	bar.add_child(_spacer())
+	undo_button = _button("Undo", _undo, "Undo the last pack change (Ctrl+Z).")
+	bar.add_child(undo_button)
+	redo_button = _button("Redo", _redo, "Redo a pack change (Ctrl+Shift+Z).")
+	bar.add_child(redo_button)
+	bar.add_child(_button("Find…", _find_anything, "Find anything (Ctrl+K)."))
 	bar.add_child(_button("+ Create", _show_new, "Create a story, character, item or other content."))
 	bar.add_child(_button("Check pack", _validate, "Find problems before playing."))
 	bar.add_child(_button("Save all", _save_all))
@@ -192,12 +226,12 @@ func _build_ui() -> void:
 	var left := VBoxContainer.new()
 	left.custom_minimum_size.x = 215
 	split.add_child(left)
-	left.add_child(_label("YOUR CONTENT", 13))
+	left.add_child(_label("LIBRARY · DRAG OR CHOOSE", 13))
 	search = LineEdit.new()
 	search.placeholder_text = "Search content…"
 	search.text_changed.connect(func(_text: String) -> void: _refresh_browser())
 	left.add_child(search)
-	browser = Tree.new()
+	browser = ContentLibrary.new()
 	browser.hide_root = true
 	browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	browser.item_selected.connect(_on_browser_selected)
@@ -206,7 +240,7 @@ func _build_ui() -> void:
 	center_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	split.add_child(center_split)
 	var center := VBoxContainer.new()
-	center.custom_minimum_size.x = 350
+	center.custom_minimum_size.x = 280
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center_split.add_child(center)
 	heading = _label("Choose something to edit", 22)
@@ -225,6 +259,20 @@ func _build_ui() -> void:
 	_build_graph_tab()
 	_build_visual_details()
 	_build_world_tab()
+	home = PackHome.new()
+	home.name = "Home"
+	tabs.add_child(home)
+	home.task_requested.connect(_start_task)
+	home.open_requested.connect(_open_world_content)
+	home.check_requested.connect(_validate)
+	navigation = HBoxContainer.new()
+	center.add_child(navigation)
+	center.move_child(navigation, center.get_child_count() - 2)
+	for place: String in ["Home", "Stories", "Map", "Details"]:
+		var index: int = {"Home": 6, "Stories": 3, "Map": 5, "Details": 4}[place]
+		navigation.add_child(_button(place, _navigate.bind(index)))
+	navigation.add_child(_button("Help", _show_tour))
+	tabs.tabs_visible = false
 	tabs.current_tab = 3
 	tabs.set_tab_title(0, "Advanced story")
 	tabs.set_tab_title(1, "Advanced fields")
@@ -232,6 +280,18 @@ func _build_ui() -> void:
 	for i in 3:
 		tabs.set_tab_hidden(i, true)
 	category_bar.set_tab_hidden(category_bar.tab_count - 1, true)
+	story_editor = StoryEditor.new()
+	center_split.add_child(story_editor)
+	story_editor.hide()
+	story_editor.changed.connect(_on_canvas_changed)
+	story_editor.problem.connect(_show_error)
+	story_editor.validated.connect(func() -> void:
+		_refresh_diagnostics()
+		_history_changed())
+	story_canvas.graph.node_selected.connect(func(name: StringName) -> void:
+		if story_canvas.graph_rows.has(name):
+			story_editor.show_story(workspace, story_canvas.graph_rows[name])
+			story_editor.visible = tabs.current_tab == 3)
 	side_panel = VBoxContainer.new()
 	side_panel.custom_minimum_size.x = 270
 	center_split.add_child(side_panel)
@@ -286,6 +346,8 @@ func _build_ui() -> void:
 	diagnostics_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	diagnostics_list.item_activated.connect(_open_diagnostic)
 	diag_box.add_child(diagnostics_list)
+	save_state = _label("Saved", 13)
+	root.add_child(save_state)
 	status = _label("", 13)
 	status.clip_text = true
 	root.add_child(status)
@@ -489,7 +551,9 @@ func _build_dialogs() -> void:
 	image_link = LineEdit.new()
 	image_form.add_child(image_link)
 	image_form.add_child(_label("The image is copied immediately; save the credit with Save all.", 12))
+	image_info_dialog.dialog_hide_on_ok = false
 	image_info_dialog.confirmed.connect(_import_image)
+	image_info_dialog.canceled.connect(func() -> void: _next_import.call_deferred())
 	add_child(image_info_dialog)
 
 func _set_status(text: String) -> void:
@@ -554,8 +618,10 @@ func _directory_selected(path: String) -> void:
 
 func _confirmed() -> void:
 	if pending_action == "replace_target":
+		if not recovery_pending: drafts.discard(workspace.target)
 		_open_target(pending_path)
 	elif pending_action == "quit":
+		if not recovery_pending: drafts.discard(workspace.target)
 		get_tree().quit()
 	elif pending_action == "delete":
 		_delete_selected()
@@ -589,16 +655,25 @@ func _open_target(path: String) -> void:
 	tabs.current_tab = 3 if has_story else 4
 	_refresh_all()
 	_set_status("Working pack opened. Other loaded packs are read-only.")
+	_set_preference("workspace", "last_pack", workspace.target)
+	_navigate(6)
+	_offer_recovery()
+	if DisplayServer.get_name() != "headless" and "--script" not in OS.get_cmdline_args() and not bool(_preference("help", "tour_seen", false)):
+		_set_preference("help", "tour_seen", true)
+		_show_tour()
 
 func _refresh_all() -> void:
 	var info := workspace.manifest(workspace.target)
-	pack_label.text = "WORKING PACK  %s     •     %d reference pack(s)     •     %s" % [info.get("id", "invalid manifest"), maxi(0, workspace.pack_paths.size() - 1), workspace.target]
+	pack_label.text = "%s · %d reference packs" % [info.get("id", "Open a pack"), maxi(0, workspace.pack_paths.size() - 1)]
+	pack_label.tooltip_text = workspace.target
 	_refresh_browser()
 	_refresh_references()
 	_refresh_values()
 	_refresh_diagnostics()
 	_refresh_selection()
 	_refresh_graph()
+	if home != null: home.refresh(workspace)
+	_history_changed()
 	if world_canvas != null and tabs.current_tab == 5:
 		world_canvas.refresh()
 
@@ -645,21 +720,19 @@ func _refresh_browser() -> void:
 		return
 	for row: Dictionary in workspace.rows:
 		var definition: FscParser.Definition = row.def
-		if not row.doc.writable:
-			continue
 		if not _matches_group(definition.type):
 			continue
 		var display: String = definition.fields["name"].value if definition.fields.has("name") else definition.id
 		if not query.is_empty() and query not in (display + " " + definition.id + " " + definition.type + " " + row.pack).to_lower():
 			continue
-		var section: String = ("Working pack" if row.doc.writable else "Reference: " + row.pack) + " / " + definition.type.capitalize()
+		var section: String = ("My pack" if row.doc.writable else "Other packs / " + row.pack) + " / " + Wording.name(definition.type).capitalize()
 		if not sections.has(section):
 			var parent := browser.create_item(root)
 			parent.set_text(0, section)
 			parent.set_selectable(0, false)
 			sections[section] = parent
 		var item := browser.create_item(sections[section])
-		item.set_text(0, display + ("  [" + definition.mode + "]" if definition.mode != "define" else ""))
+		item.set_text(0, Wording.icon(definition.type) + " " + display + ("  [" + definition.mode + "]" if definition.mode != "define" else ""))
 		item.set_metadata(0, row)
 		item.set_tooltip_text(0, row.doc.path + ":" + str(definition.line))
 
@@ -937,6 +1010,7 @@ func _save_all() -> void:
 	if not error.is_empty():
 		_show_error(error)
 		return
+	if not recovery_pending: drafts.discard(workspace.target)
 	workspace.reindex()
 	_refresh_all()
 	_set_status("Saved changes to the working pack.")
@@ -992,7 +1066,7 @@ func _set_new_type(type: String) -> void:
 func _new_name_changed(value: String) -> void:
 	new_validation_error = ""
 	if not new_id_edited:
-		var slug := RegEx.create_from_string("[^a-z0-9]+").sub(value.to_lower(), "_", true).trim_prefix("_").trim_suffix("_")
+		var slug := workspace.unique_id(value, new_type.get_item_text(new_type.selected))
 		new_id.text = slug
 	_refresh_new_summary()
 
@@ -1062,6 +1136,14 @@ func _refresh_new_summary() -> void:
 	new_review.add_child(AuthoringLayout.label("You can add responses, actions and connections after creating it.", 15, true))
 
 func _create_definition() -> void:
+	new_validation_error = ""
+	var error := workspace.transaction("Create " + new_name.text, func() -> String:
+		_create_definition_impl()
+		return new_validation_error)
+	if not error.is_empty(): _creation_error(error)
+	_history_changed()
+
+func _create_definition_impl() -> void:
 	var type := new_type.get_item_text(new_type.selected)
 	var id := new_id.text.strip_edges()
 	var display_name := new_name.text.strip_edges()
@@ -1227,6 +1309,9 @@ func _open_visual_script(row: Dictionary, field: String) -> void:
 func _refresh_graph() -> void:
 	if story_canvas != null:
 		story_canvas.refresh()
+		if story_editor != null and not story_canvas.context_row.is_empty():
+			story_editor.show_story(workspace, story_canvas.context_row)
+			story_editor.visible = tabs.current_tab == 3
 
 func _on_canvas_changed(row: Dictionary) -> void:
 	selected = row
@@ -1311,7 +1396,7 @@ func _choose_image() -> void:
 func _image_selected(path: String) -> void:
 	image_source = path
 	image_id.text = path.get_file().get_basename().to_lower().replace(" ", "_")
-	image_artist.text = ""
+	image_artist.text = str(_preference("images", "artist", ""))
 	image_link.text = ""
 	image_info_dialog.popup_centered()
 
@@ -1359,8 +1444,11 @@ func _import_image() -> void:
 	var separator := "" if credit_doc.text.is_empty() else (eol if credit_doc.text.ends_with("\n") else eol + eol)
 	var credit := "== image " + id + eol + "artist: " + artist + (eol + "link: " + link if not link.is_empty() else "") + eol
 	credit_doc.change(credit_doc.text + separator + credit)
+	_set_preference("images", "artist", artist)
 	workspace.reindex()
 	_refresh_all()
+	image_info_dialog.hide()
+	_next_import.call_deferred()
 	_set_status("Image copied. Save all to write its artist credit.")
 
 func _declare_selected_dependency() -> void:
@@ -1414,6 +1502,7 @@ func _new_story_node() -> void:
 func _toggle_advanced(enabled: bool) -> void:
 	for i in 3:
 		tabs.set_tab_hidden(i, not enabled)
+	tabs.tabs_visible = enabled
 	category_bar.set_tab_hidden(category_bar.tab_count - 1, not enabled)
 	if not enabled and tabs.current_tab < 3:
 		tabs.current_tab = 4 if tabs.is_tab_hidden(3) else 3
@@ -1425,6 +1514,7 @@ func _entries_ready() -> bool:
 	return true
 
 func _on_tab_changed(index: int) -> void:
+	if story_editor != null: story_editor.visible = index == 3 and not story_editor.row.is_empty()
 	if visual_details != null and visual_details.pending_rows and index != 4:
 		tabs.current_tab = 4
 		_show_error("Apply your edited entries before leaving this section.")
@@ -1454,3 +1544,205 @@ func _open_reference_definition(index: int) -> void:
 		tabs.current_tab = 3
 	else:
 		tabs.current_tab = 4
+
+
+func _build_workflow() -> void:
+	drops = ContentDropMenu.new()
+	add_child(drops)
+	drops.applied.connect(_on_canvas_changed)
+	drops.open_requested.connect(_open_world_content)
+	story_canvas.graph.content_dropped.connect(_story_drop)
+	world_canvas.graph.content_dropped.connect(_map_drop)
+	wizard = TaskWizard.new()
+	add_child(wizard)
+	wizard.created.connect(func(result: Dictionary) -> void:
+		_refresh_all()
+		for row: Dictionary in workspace.rows:
+			if row.doc.writable and row.def.id == result.id and row.def.type == result.type:
+				_open_world_content(row)
+				break
+		_set_status("Created " + str(result.id).replace("_", " ") + " · Undo is available."))
+	palette = CommandPalette.new()
+	add_child(palette)
+	palette.chosen.connect(_palette_chosen)
+	recovery_dialog = ConfirmationDialog.new()
+	recovery_dialog.title = "Restore unsaved changes?"
+	recovery_dialog.ok_button_text = "Restore draft"
+	recovery_dialog.cancel_button_text = "Keep for later"
+	recovery_dialog.add_button("Discard draft", true, "discard")
+	recovery_dialog.confirmed.connect(func() -> void:
+		var error := drafts.restore(workspace)
+		if not error.is_empty():
+			_show_error(error)
+			return
+		recovery_pending = false
+		_refresh_all()
+		_set_status("Unsaved draft restored. Save all when ready."))
+	recovery_dialog.custom_action.connect(func(action: StringName) -> void:
+		if action == "discard":
+			drafts.discard(workspace.target)
+			recovery_pending = false
+			recovery_dialog.hide())
+	add_child(recovery_dialog)
+	tour = AcceptDialog.new()
+	tour.title = "A quick tour"
+	tour.ok_button_text = "Skip / close"
+	var tour_body := VBoxContainer.new()
+	tour_body.custom_minimum_size = Vector2(460, 140)
+	tour_text = AuthoringLayout.label("", 18, true)
+	tour_body.add_child(tour_text)
+	tour.add_child(tour_body)
+	var next := tour.add_button("Next", false)
+	next.pressed.connect(func() -> void:
+		tour_step = (tour_step + 1) % 5
+		_update_tour())
+	add_child(tour)
+	_history_changed()
+
+func _preference(section: String, key: String, fallback: Variant) -> Variant:
+	var config := ConfigFile.new()
+	config.load(OS.get_user_data_dir().path_join("preferences.cfg"))
+	return config.get_value(section, key, fallback)
+
+func _set_preference(section: String, key: String, value: Variant) -> void:
+	var config := ConfigFile.new()
+	var path := OS.get_user_data_dir().path_join("preferences.cfg")
+	config.load(path)
+	config.set_value(section, key, value)
+	if config.save(path) != OK: _set_status("Could not remember this setting.")
+
+func _history_changed() -> void:
+	if undo_button == null: return
+	undo_button.disabled = workspace.history.cursor == 0
+	redo_button.disabled = workspace.history.cursor >= workspace.history.steps.size()
+	undo_button.tooltip_text = "Undo " + (str(workspace.history.steps[workspace.history.cursor - 1].label) if workspace.history.cursor > 0 else "(no changes)")
+	if save_state != null:
+		save_state.text = "Saved" if workspace.dirty_count() == 0 else "● %d unsaved files" % workspace.dirty_count()
+
+func _undo() -> void:
+	if not _entries_ready(): return
+	var label := workspace.undo()
+	_after_history("Undid " + label)
+
+func _redo() -> void:
+	if not _entries_ready(): return
+	var label := workspace.redo()
+	_after_history("Redid " + label)
+
+func _after_history(label: String) -> void:
+	if not selected.is_empty(): selected = workspace.find_row(selected.doc.path, selected.def.type, selected.def.id, selected.def.mode, selected.get("ordinal", 0))
+	_refresh_all()
+	_set_status(label)
+
+func _navigate(index: int) -> void:
+	if not _entries_ready(): return
+	if index == 3: tabs.set_tab_hidden(3, false)
+	tabs.current_tab = index
+	if index == 6:
+		home.refresh(workspace)
+		heading.text = "Your pack"
+		detail.text = "Start a task, continue writing, or check your work."
+
+func _start_task(template: Dictionary) -> void:
+	if _entries_ready(): wizard.open(workspace, template)
+
+func _find_anything() -> void:
+	if _entries_ready(): palette.open(workspace)
+
+func _palette_chosen(entry: Dictionary) -> void:
+	if entry.has("row"):
+		var row: Dictionary = entry.row
+		_open_world_content(workspace.find_row(row.doc.path, row.def.type, row.def.id, row.def.mode, row.get("ordinal", 0)))
+	elif entry.has("value"):
+		_set_side_panel(true)
+		side_tabs.current_tab = 1
+		values_search.text = entry.value
+		_refresh_values()
+	else:
+		match entry.command:
+			"Home": _navigate(6)
+			"New content": _show_new()
+			"Check pack": _validate()
+			"Save all": _save_all()
+			"Undo": _undo()
+			"Redo": _redo()
+			"Tour": _show_tour()
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not event is InputEventKey or not event.pressed or event.echo: return
+	if event.ctrl_pressed or event.meta_pressed:
+		match event.keycode:
+			KEY_K: _find_anything()
+			KEY_S: _save_all()
+			KEY_Z:
+				# Text controls retain their own draft undo until focus leaves.
+				var focus := get_viewport().gui_get_focus_owner()
+				if focus is TextEdit or focus is LineEdit: return
+				if event.shift_pressed: _redo()
+				else: _undo()
+			KEY_Y: _redo()
+			_: return
+		get_viewport().set_input_as_handled()
+
+func _autosave() -> void:
+	if recovery_pending: return
+	var error := drafts.save(workspace)
+	if not error.is_empty(): _set_status(error)
+
+func _offer_recovery() -> void:
+	var draft := drafts.read_draft(workspace.target)
+	recovery_pending = FileAccess.file_exists(drafts.path_for(workspace.target))
+	if not recovery_pending: return
+	if draft.is_empty():
+		_show_error("A recovery draft could not be read. It is kept at " + drafts.path_for(workspace.target) + ". New autosaves will wait until it is recovered or moved aside.")
+		return
+	for path: Variant in draft.get("references", []):
+		if path is String: workspace.add_reference(path)
+	_refresh_all()
+	recovery_dialog.dialog_text = "A previous session left %d unsaved files. Restore them without changing the files on disk?" % draft.get("documents", []).size()
+	recovery_dialog.popup_centered()
+
+func _files_dropped(files: PackedStringArray) -> void:
+	if workspace.target.is_empty():
+		_show_error("Open a working pack before dropping pictures.")
+		return
+	for path: String in files:
+		if path.get_extension().to_lower() in ["png", "jpg", "jpeg", "webp"]: import_queue.append(path)
+	_next_import()
+
+func _next_import() -> void:
+	if import_queue.is_empty(): return
+	_image_selected(import_queue.pop_front())
+
+func _show_tour() -> void:
+	if tour == null: return
+	tour_step = 0
+	_update_tour()
+	tour.popup_centered()
+
+func _update_tour() -> void:
+	var steps := ["1 / 5 · Library\nFind people, items, places and pictures on the left. Choose an entry or drag it to a matching picker.", "2 / 5 · Home tasks\nChoose a task on Home. Write names and prose, choose the links, then review before creating.", "3 / 5 · Stories\nThe board connects stories. Click a passage to write; responses can lead to another story or return.", "4 / 5 · Preview\nChoose a sample player under the side editor to preview text. Story actions are not applied.", "5 / 5 · Check and save\nCheck pack finds engine problems. Save all writes your changes. Undo, Redo and recovery drafts help you recover edits."]
+	tour_text.text = steps[tour_step]
+
+
+func _story_drop(data: Dictionary, position: Vector2) -> void:
+	var content := DragPayload.resolve(workspace, data)
+	var target: Dictionary = story_canvas.context_row
+	for name: StringName in story_canvas.graph_rows:
+		var card := story_canvas.graph.get_node(NodePath(name)) as Control
+		if card != null and Rect2(card.position, card.size * story_canvas.graph.zoom).has_point(position):
+			target = story_canvas.graph_rows[name]
+			break
+	if content.is_empty(): return
+	drops.open(workspace, content, target)
+
+func _map_drop(data: Dictionary, position: Vector2) -> void:
+	var content := DragPayload.resolve(workspace, data)
+	if content.is_empty(): return
+	var target: Dictionary = {}
+	for node: StringName in world_canvas.rows_by_node:
+		var card := world_canvas.graph.get_node(NodePath(node)) as Control
+		if card != null and Rect2(card.position, card.size * world_canvas.graph.zoom).has_point(position):
+			target = world_canvas.rows_by_node[node]
+			break
+	drops.open(workspace, content, target)

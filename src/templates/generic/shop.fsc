@@ -1,0 +1,12 @@
+// title: Open a shop
+// question: name|Name|name|
+// question: place|Shop location|location|
+// question: item|First item to sell|item|
+// question: price|Price|number|1
+// question: currency|Trading currency|item|
+== shop {{id}}
+name: {{name}}
+at: {{place}}
+currency: item {{currency}}
+stock:
+    {{item}}: {{price}}

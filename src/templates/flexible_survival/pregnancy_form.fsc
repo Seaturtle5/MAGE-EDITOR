@@ -1,0 +1,9 @@
+// title: Pregnancy-capable form
+// question: name|Name|name|
+// question: sex|Body sex|choice:female,male,herm,neuter|female
+== form {{id}}
+name: {{name}}
+sex: {{sex}}
+body type: humanoid
+scale: 3
+offspring gender: {{sex}} 1 in 1

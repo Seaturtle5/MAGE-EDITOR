@@ -44,7 +44,8 @@ func _ready() -> void:
 	hint.text = "Drag a right connector to add an exit; right-click a connection to remove an exit. Labels show each direction."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(hint)
-	graph = GraphEdit.new()
+	graph = DropSurface.new()
+	graph.workspace = workspace
 	graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	graph.minimap_enabled = false
 	graph.right_disconnects = true
@@ -88,7 +89,7 @@ func _build_dialogs() -> void:
 	one_way.text = "This exit is one-way"
 	form.add_child(one_way)
 	var note := Label.new()
-	note.text = "A return exit is a separate connection."
+	note.text = "A matching return exit is created by default. Shift-drag chooses one way."
 	form.add_child(note)
 	exit_dialog.add_child(form)
 	exit_dialog.confirmed.connect(_add_exit)
@@ -350,7 +351,7 @@ func _request_exit(from: StringName, _from_port: int, to: StringName, _to_port: 
 		problem.emit("This place already has an exit in every available direction.")
 		return
 	direction.select(first_available)
-	one_way.button_pressed = false
+	one_way.button_pressed = Input.is_key_pressed(KEY_SHIFT)
 	exit_dialog.title = "Connect %s → %s" % [_title(exit_source), _title(exit_target)]
 	exit_dialog.popup_centered()
 
@@ -400,43 +401,11 @@ func _remove_exit() -> void:
 	changed.emit(workspace.find_row(current.doc.path, "location", current.def.id, current.def.mode, current.get("ordinal", 0)))
 
 func _add_exit() -> void:
-	var source_id: String = exit_source.def.id
-	var target_id: String = exit_target.def.id
-	var way: String = DIRECTIONS[direction.selected]
-	for existing: Dictionary in exits_by_place.get(source_id, []):
-		if existing.direction == way:
-			problem.emit("This place already has an exit in that direction.")
-			return
-	var value := way + ": " + target_id + (", one way" if one_way.button_pressed else "")
-	var writable: Dictionary = {}
-	for candidate: Dictionary in workspace.rows:
-		if candidate.def.type == "location" and candidate.def.id == source_id and candidate.doc.writable and candidate.def.mode in ["define", "extend", "replace"]:
-			writable = candidate
-			break
-	var error := ""
-	if writable.is_empty():
-		error = workspace.create_definition("location", source_id, "extend", "exits:\n    " + value)
-	else:
-		var doc: PackDocument = writable.doc
-		var field: FscParser.Field = writable.def.fields.get("exits")
-		if field == null:
-			error = doc.set_field(writable.def, "exits", value, true)
-		elif not field.value.is_empty():
-			error = "This exit section has an unsupported layout and was left unchanged."
-		else:
-			var lines := doc.text.split("\n")
-			var insertion: int = field.children[-1].number if not field.children.is_empty() else field.line
-			StoryGraph._insert_line(doc, lines, insertion, "    " + value)
-			doc.change("\n".join(lines))
+	var error := workspace.connect_places(exit_source, exit_target, DIRECTIONS[direction.selected], not one_way.button_pressed)
 	if not error.is_empty():
 		problem.emit(error)
 		return
-	workspace.reindex()
-	for referenced: Dictionary in [exit_source, exit_target]:
-		if referenced.root != workspace.target:
-			var dependency_error := workspace.add_requirement(referenced.pack)
-			if not dependency_error.is_empty(): problem.emit("Add the reference pack as a dependency: " + dependency_error)
-	var updated := workspace.find_row(exit_source.doc.path, "location", source_id, exit_source.def.mode, exit_source.get("ordinal", 0))
+	var updated := workspace.find_row(exit_source.doc.path, "location", exit_source.def.id, exit_source.def.mode, exit_source.get("ordinal", 0))
 	changed.emit(updated)
 
 func _show_contents(row: Dictionary) -> void:

@@ -1,0 +1,18 @@
+// title: A shopkeeper
+// question: name|Name|name|
+// question: place|Shop location|location|
+// question: item|First item to sell|item|
+// question: currency|Trading currency|item|
+== character {{id}}
+name: {{name}}
+pronouns: they
+lives at: {{place}}
+talk:
+    Welcome to my shop.
+== shop {{id}}_shop
+name: {{name}}'s shop
+at: {{place}}
+run by: {{id}}
+currency: item {{currency}}
+stock:
+    {{item}}: 1

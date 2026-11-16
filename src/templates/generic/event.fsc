@@ -1,0 +1,21 @@
+// title: Something happens at a place
+// question: name|Name|name|
+// question: area|Exploring area|zone|
+// question: repeat|How often|choice:once,until resolved,always|once
+// question: opening|What happens?|prose|You discover something unexpected.
+// question: item|An item to find (optional)|item?|
+== event {{id}}
+name: {{name}}
+found by: exploring in {{area}}
+repeat: {{repeat}}
+outcomes: taken, left
+play:
+    {{opening}}
+    * Take it
+        {{item_effect}}
+        ~ outcome taken
+        ~ resolve
+        -> end
+    * Leave it
+        ~ outcome left
+        -> end

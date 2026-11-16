@@ -9,4 +9,4 @@ func _get_drag_data(at_position: Vector2) -> Variant:
 	var preview := Label.new()
 	preview.text = data.get("id", "")
 	set_drag_preview(preview)
-	return {"mage_reference": data.get("id", "")}
+	return DragPayload.content(data.row) if data.has("row") else {"mage_reference": data.get("id", "")}

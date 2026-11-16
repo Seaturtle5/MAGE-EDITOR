@@ -1,0 +1,8 @@
+// title: Write an ending
+// question: name|Name|name|
+// question: opening|Ending text|prose|A new chapter awaits.
+== ending {{id}}
+name: {{name}}
+type: victory
+play:
+    {{opening}}

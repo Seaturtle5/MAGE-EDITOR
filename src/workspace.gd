@@ -12,6 +12,19 @@ var validation_paths: Dictionary = {}
 var revision := 0
 var preview_revision := -1
 var preview_db: ContentDB
+var history := EditHistory.new()
+var validation_revision := -1
+
+func validate_buffers() -> void:
+	# The same loader operations as preview_content retain original paths.
+	# Assets remain read-only at their pack paths; only text buffers are loaded.
+	preview_revision = -1
+	db = preview_content()
+	Validator.run(db)
+	diagnostics = db.diagnostics.duplicate(true)
+	for folder: String in pack_paths:
+		if manifest(folder).is_empty(): diagnostics.append({"severity": "error", "path": folder.path_join("pack.fsc"), "line": 1, "message": "The manifest must contain exactly one pack definition."})
+	validation_revision = revision
 
 func preview_content() -> ContentDB:
 	if preview_db != null and preview_revision == revision:
@@ -52,8 +65,11 @@ func open_pack(folder: String) -> String:
 	target = folder.simplify_path().trim_suffix("/")
 	pack_paths.assign([target])
 	documents.clear()
+	history.applying = true
 	_scan(target, true)
 	reindex()
+	history.applying = false
+	history.reset(documents)
 	validate()
 	return ""
 
@@ -132,6 +148,7 @@ func reindex() -> void:
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return (a.def.type + ":" + a.def.id + ":" + a.pack).naturalnocasecmp_to(b.def.type + ":" + b.def.id + ":" + b.pack) < 0)
 	revision += 1
+	history.checkpoint(documents)
 
 
 func owner(path: String) -> String:
@@ -286,6 +303,7 @@ func validate() -> void:
 		if manifest(folder).is_empty():
 			diagnostics.append({"severity": "error", "path": folder.path_join("pack.fsc"), "line": 1, "message": "The manifest must contain exactly one pack definition."})
 	_remove_folder(snapshot)
+	validation_revision = revision
 
 
 static func _original_path(path: String, mapping: Dictionary) -> String:
@@ -374,3 +392,112 @@ func _inside_working_pack(path: String) -> bool:
 			return false
 		current = current.path_join(part)
 	return true
+
+
+func transaction(label: String, operation: Callable) -> String:
+	var before := history.capture(documents)
+	var previous_baseline := history.baseline
+	history.depth += 1
+	var result: Variant = operation.call()
+	var error := str(result) if result is String else ""
+	history.depth -= 1
+	if not error.is_empty():
+		history.applying = true
+		history.restore(documents, before)
+		history.baseline = previous_baseline
+		reindex()
+		history.applying = false
+		return error
+	history.checkpoint(documents, label)
+	reindex()
+	return ""
+
+func undo() -> String:
+	history.checkpoint(documents)
+	history.applying = true
+	var label := history.undo(documents)
+	reindex()
+	history.applying = false
+	return label
+
+func redo() -> String:
+	history.applying = true
+	var label := history.redo(documents)
+	reindex()
+	history.applying = false
+	return label
+
+func unique_id(display_name: String, type: String) -> String:
+	var id := RegEx.create_from_string("[^a-z0-9_]+").sub(display_name.to_lower(), "_", true).strip_edges().trim_prefix("_").trim_suffix("_")
+	if id.is_empty(): id = type
+	var candidate := id
+	var suffix := 2
+	while rows.any(func(row: Dictionary) -> bool: return row.def.type == type and row.def.id == candidate):
+		candidate = id + "_" + str(suffix)
+		suffix += 1
+	return candidate
+
+func require_content(type: String, id: String) -> String:
+	for row: Dictionary in rows:
+		if row.def.type == type and row.def.id == id and row.def.mode != "extend":
+			return add_requirement(row.pack) if not row.doc.writable else ""
+	return ""
+
+func require_value(path: String) -> String:
+	var declaration: Dictionary = preview_content().values.get(path, {})
+	var folder := owner(str(declaration.get("path", "")))
+	if folder.is_empty() or folder == target: return ""
+	return add_requirement(manifest(folder).id)
+
+func require_condition(condition: Dictionary) -> String:
+	var error := ""
+	if condition.get("op") in ["and", "or", "not"]:
+		error = require_condition(condition.a)
+		if error.is_empty() and condition.has("b"): error = require_condition(condition.b)
+	elif condition.get("op") == "cmp":
+		for path: String in Expr.paths(condition.left) + Expr.paths(condition.right):
+			error = require_value(path)
+			if not error.is_empty(): return error
+	elif condition.get("op") == "truthy": error = require_value(condition.path)
+	elif condition.get("op") == "has_item": error = require_content("item", condition.item)
+	elif condition.get("op") == "quest": error = require_content("quest", condition.quest)
+	return error
+
+func connect_places(source: Dictionary, destination: Dictionary, direction: String, two_way: bool = true) -> String:
+	const OPPOSITE := {"north": "south", "northeast": "southwest", "east": "west", "southeast": "northwest", "south": "north", "southwest": "northeast", "west": "east", "northwest": "southeast", "up": "down", "down": "up", "inside": "outside", "outside": "inside"}
+	if direction not in OPPOSITE or source.is_empty() or destination.is_empty(): return "Choose two places and a direction."
+	if source.def.id == destination.def.id: return "Choose two different places."
+	var pairs: Array = [[source, destination, direction]]
+	if two_way: pairs.append([destination, source, OPPOSITE[direction]])
+	return transaction("Connect " + Wording.title(source) + " and " + Wording.title(destination), func() -> String:
+		for pair: Array in pairs:
+			var from: Dictionary = pair[0]
+			var to: Dictionary = pair[1]
+			var effective := preview_content().get_def("location", from.def.id)
+			if effective == null: return "This place changed. Reopen the map."
+			if effective.fields.has("exits"):
+				for line: FscParser.Line in effective.fields.exits.children:
+					if line.text.get_slice(":", 0).strip_edges() == pair[2]:
+						return "An exit already uses " + str(pair[2]) + " at " + Wording.title(from) + ". Choose another direction or a one-way exit."
+			var writable: Dictionary = {}
+			for candidate: Dictionary in rows:
+				if candidate.doc.writable and candidate.def.type == "location" and candidate.def.id == from.def.id: writable = candidate
+			var entry: String = pair[2] + ": " + to.def.id + (", one way" if not two_way else "")
+			var error := ""
+			if writable.is_empty(): error = create_definition("location", from.def.id, "extend", "exits:\n    " + entry)
+			else:
+				var field: FscParser.Field = writable.def.fields.get("exits")
+				if field == null: error = writable.doc.set_field(writable.def, "exits", entry, true)
+				elif not field.value.is_empty(): return "This exit section uses a layout that must be kept."
+				else:
+					var lines := StoryGraph._lines(writable.doc)
+					var insertion: int = field.children[-1].number if not field.children.is_empty() else field.line
+					StoryGraph._insert_line(writable.doc, lines, insertion, "    " + entry)
+					StoryGraph._save_lines(writable.doc, lines)
+			if not error.is_empty(): return error
+			for referenced: Dictionary in [from, to]:
+				if not referenced.doc.writable:
+					error = add_requirement(referenced.pack)
+					if not error.is_empty(): return error
+			reindex()
+		return "")

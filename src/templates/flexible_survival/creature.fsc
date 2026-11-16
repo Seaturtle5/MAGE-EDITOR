@@ -1,0 +1,27 @@
+// title: A creature you can fight
+// question: name|Name|name|
+// question: area|Encounter area|zone|
+// question: strength|Difficulty|choice:weak,even,strong|even
+// question: form|Mutates toward|form|
+// question: opening|Encounter|prose|A creature approaches.
+// question: win|If the player wins|prose|You emerge victorious.
+// question: lose|If the player loses|prose|The creature has won.
+== creature {{id}}
+name: {{name}}
+found in: {{area}}
+level: {{level}}
+hp: {{hp}}
+damage: {{damage}}
+form: {{form}}
+encounter:
+    -> {{id}}_encounter
+defeated:
+    -> {{id}}_win
+victory:
+    -> {{id}}_lose
+== scene {{id}}_encounter
+{{opening}}
+== scene {{id}}_win
+{{win}}
+== scene {{id}}_lose
+{{lose}}

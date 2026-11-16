@@ -60,7 +60,7 @@ var writing_new_field := ""
 var writing_discard: ConfirmationDialog
 
 func _ready() -> void:
-	var toolbar := HBoxContainer.new()
+	var toolbar := HFlowContainer.new()
 	add_child(toolbar)
 	var hint := Label.new()
 	hint.text = "STORY BOARD"
@@ -93,8 +93,10 @@ func _ready() -> void:
 	help.add_theme_font_size_override("font_size", 12)
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(help)
-	graph = GraphEdit.new()
+	graph = DropSurface.new()
+	graph.workspace = workspace
 	graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	graph.get_menu_hbox().hide()
 	graph.minimap_enabled = false
 	graph.right_disconnects = true
 	graph.connection_request.connect(_connect_response)

@@ -1,0 +1,8 @@
+// title: Start a quest
+// question: name|Name|name|
+// question: stages|Quest stages, one per line|stages|Not started;Looking;Complete
+== quest {{id}}
+name: {{name}}
+stages:
+    {{stage_lines}}
+done at: {{last_stage}}

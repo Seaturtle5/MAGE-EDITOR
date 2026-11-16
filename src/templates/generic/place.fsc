@@ -1,0 +1,8 @@
+// title: Add a place
+// question: name|Name|name|
+// question: description|Description|prose|A quiet place to explore.
+== location {{id}}
+name: {{name}}
+zone: none
+description:
+    {{description}}

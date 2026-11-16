@@ -8,6 +8,16 @@ import subprocess
 import tempfile
 
 
+def stage_project(source: Path, engine: Path, example: Path, runtime: Path):
+    shutil.copy2(source / "project.godot", runtime / "project.godot")
+    shutil.copytree(source / "src", runtime / "src", ignore=shutil.ignore_patterns("*.uid"))
+    shutil.copytree(engine / "engine", runtime / "engine", ignore=shutil.ignore_patterns("*.uid"))
+    if (engine / "ui/fonts").is_dir():
+        shutil.copytree(engine / "ui/fonts", runtime / "fonts", ignore=shutil.ignore_patterns("*.import"))
+    if (example / "pack.fsc").is_file():
+        shutil.copytree(example, runtime / "example-pack")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", type=Path, default=os.environ.get("MAGE_ENGINE"))
@@ -25,13 +35,7 @@ def main():
     # either source checkout. Copy the current library rather than forking it.
     with tempfile.TemporaryDirectory(prefix="mage-editor-") as staging:
         runtime = Path(staging)
-        shutil.copy2(source / "project.godot", runtime / "project.godot")
-        shutil.copytree(source / "src", runtime / "src", ignore=shutil.ignore_patterns("*.uid"))
-        shutil.copytree(engine / "engine", runtime / "engine", ignore=shutil.ignore_patterns("*.uid"))
-        if (engine / "ui/fonts").is_dir():
-            shutil.copytree(engine / "ui/fonts", runtime / "fonts", ignore=shutil.ignore_patterns("*.import"))
-        if (example / "pack.fsc").is_file():
-            shutil.copytree(example, runtime / "example-pack")
+        stage_project(source, engine, example, runtime)
         result = subprocess.run(
             [args.godot, "--headless", "--path", staging, "--editor", "--import"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

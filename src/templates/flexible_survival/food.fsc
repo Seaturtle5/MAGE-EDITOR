@@ -1,0 +1,15 @@
+// title: Food or drink with mutation
+// question: name|Name|name|
+// question: description|Description|prose|Something to eat.
+// question: form|Also mutates toward|form|
+// question: heal|Restore health by|number|10
+== item {{id}}
+name: {{name}}
+category: food
+consumed: yes
+infectious: {{form}}
+description:
+    {{description}}
+use:
+    ~ hunger - 10
+    ~ heal {{heal}}

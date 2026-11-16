@@ -1,0 +1,27 @@
+// title: Talk to a character
+// question: name|Name|name|
+// question: pronouns|Pronouns|choice:they,she,he,it|they
+// question: place|Home place|location|
+// question: greeting|Greeting|prose|Hello, stranger.
+// question: response1|First response|prose|Ask about this place
+// question: reply1|First reply|prose|There is much to discover.
+// question: response2|Second response|prose|Ask about them
+// question: reply2|Second reply|prose|Perhaps we will get to know each other.
+// question: response3|Last response|prose|Say goodbye
+== character {{id}}
+name: {{name}}
+pronouns: {{pronouns}}
+lives at: {{place}}
+values:
+    met: flag
+talk:
+    ~ {{id}}.met = true
+    {{greeting}}
+    * {{response1}}
+        {{reply1}}
+        -> back
+    * {{response2}}
+        {{reply2}}
+        -> back
+    * {{response3}}
+        -> end

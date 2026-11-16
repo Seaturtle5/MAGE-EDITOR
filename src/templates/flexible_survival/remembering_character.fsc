@@ -1,0 +1,23 @@
+// title: A character who remembers you
+// question: name|Name|name|
+// question: place|Home place|location|
+// question: greeting|Greeting|prose|It is good to see you.
+// question: trust|Trust needed|number|3
+== character {{id}}
+name: {{name}}
+pronouns: they
+lives at: {{place}}
+values:
+    met: flag
+    trust: number 0
+    last_visit: time
+talk:
+    ~ {{id}}.met = true
+    ~ {{id}}.last_visit = now
+    {{greeting}}
+    * Get to know each other
+        ~ {{id}}.trust + 1
+        -> back
+    * Ask a personal question [if {{id}}.trust >= {{trust}}]
+        You share a moment together.
+        -> end
