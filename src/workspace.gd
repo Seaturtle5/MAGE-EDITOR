@@ -501,3 +501,70 @@ func connect_places(source: Dictionary, destination: Dictionary, direction: Stri
 					if not error.is_empty(): return error
 			reindex()
 		return "")
+
+var _titles: Dictionary = {}
+var _titles_revision := -1
+
+## The name an author sees for content; with an empty type, any type holding the ID.
+func title_of(type: String, id: String) -> String:
+	if _titles_revision != revision:
+		_titles.clear()
+		for row: Dictionary in rows:
+			if row.def.mode == "extend" or not row.def.fields.has("name"): continue
+			var title: String = row.def.fields.name.value
+			if title.is_empty(): continue
+			_titles[row.def.type + ":" + row.def.id] = title
+			if not _titles.has(":" + row.def.id) or row.def.type == "character": _titles[":" + row.def.id] = title
+		_titles_revision = revision
+	return _titles.get(type + ":" + id, _titles.get(":" + id, "") if type in ["", "who", "holder"] else "")
+
+## Adds "name: spec" to a definition's values (for example "trust: number 0").
+func declare_value(type: String, id: String, name: String, spec: String) -> String:
+	if RegEx.create_from_string("^[a-z_][a-z0-9_]*$").search(name) == null: return "Use a name of letters and numbers."
+	if spec.strip_edges().is_empty(): return "Name at least two stages, with commas between."
+	if preview_content().values.has(id + "." + name): return "This name is already used there. Choose another."
+	for row: Dictionary in rows:
+		if not row.doc.writable or row.def.type != type or row.def.id != id or row.def.mode == "replace": continue
+		var field: FscParser.Field = row.def.fields.get("values")
+		if field == null: return row.doc.set_field(row.def, "values", name + ": " + spec, true)
+		if not field.value.is_empty(): return "These saved values use a layout that must be kept."
+		var lines := StoryGraph._lines(row.doc)
+		var last: int = field.children[-1].number if not field.children.is_empty() else field.line
+		StoryGraph._insert_line(row.doc, lines, last, "    " + name + ": " + spec)
+		StoryGraph._save_lines(row.doc, lines)
+		return ""
+	return "Choose content in your own pack to hold this value."
+
+var _words: Dictionary = {}
+var _words_revision := -1
+
+## Words already used in the loaded packs, to suggest where the engine takes any word.
+func known_words(list: String) -> Array:
+	if BlockCatalog.WORDS.has(list): return BlockCatalog.WORDS[list]
+	if _words_revision != revision:
+		_words.clear()
+		_words_revision = revision
+	if _words.has(list): return _words[list]
+	var found: Dictionary = {}
+	var pattern: RegEx = null
+	match list:
+		"trait": pattern = RegEx.create_from_string("\\btrait(?: [+-])? ([a-z0-9_]+)")
+		"mode": pattern = RegEx.create_from_string("\\bmode ([a-z0-9_]+)")
+		"variant": pattern = RegEx.create_from_string("\\bvariant ([a-z0-9_]+)")
+		"place_flag": pattern = RegEx.create_from_string("\\bflagged ([a-z][a-z ]*?)(?:\\]|:| and | or |$)")
+		"ending_flag": pattern = RegEx.create_from_string("\\bending flag ([a-z0-9_]+)")
+		"interest": pattern = RegEx.create_from_string("\\binterested in ([a-z_]+)")
+	for row: Dictionary in rows:
+		if list == "tag" and row.def.fields.has("tags"):
+			for tag: String in str(row.def.fields.tags.value).split(","):
+				if not tag.strip_edges().is_empty(): found[tag.strip_edges()] = true
+		if list == "place_flag" and row.def.fields.has("flags"):
+			for flag: String in str(row.def.fields.flags.value).split(","):
+				if not flag.strip_edges().is_empty(): found[flag.strip_edges()] = true
+	if pattern != null:
+		for path: String in documents:
+			for matched: RegExMatch in pattern.search_all(documents[path].text): found[matched.get_string(1)] = true
+	var result: Array = found.keys()
+	result.sort()
+	_words[list] = result
+	return result

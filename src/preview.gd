@@ -3,6 +3,8 @@ extends VBoxContainer
 ## Uses the engine's compiler, conditions and text renderer on throwaway state.
 
 signal line_selected(line: int)
+signal rendered
+var last_entries: Array[Dictionary] = []
 var workspace: PackWorkspace
 var row: Dictionary = {}
 var sample: OptionButton
@@ -165,7 +167,9 @@ func refresh() -> void:
 	for child: Node in output.get_children():
 		output.remove_child(child)
 		child.queue_free()
-	for entry: Dictionary in render_story(workspace, row, {"sex": ["female", "male", "herm", "neuter"][sample.selected], "form": sample_form, "level": sample_level, "values": overrides}, seed_value):
+	last_entries = render_story(workspace, row, {"sex": ["female", "male", "herm", "neuter"][sample.selected], "form": sample_form, "level": sample_level, "values": overrides}, seed_value)
+	rendered.emit()
+	for entry: Dictionary in last_entries:
 		if entry.kind == "branch": continue
 		if entry.kind == "image" and not str(entry.image).is_empty():
 			var path := workspace.preview_content().image_file(entry.image)

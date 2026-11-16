@@ -9,6 +9,23 @@ static func color(key: String) -> Color:
 	var cream := {"bg": "f3ecde", "surface": "fff9ee", "raised": "ede2ce", "hover": "e5d6bc", "border": "c9b99d", "text": "332b22", "muted": "70604c", "accent": "87501d", "selected": "ead3ad", "bad": "a63b2d", "info": "3c677e", "good": "486b38"}
 	return Color((cream if light else dark)[key])
 
+## Category colours are chosen to stay apart for colour-blind readers
+## (after Okabe and Ito); every category also has its own icon.
+const CATEGORY := {
+	"character": ["👤", "5aa9e6", "1f6fb2"], "item": ["🎒", "e6a23c", "9a5a00"], "location": ["📍", "4cc9a4", "0f7a5c"],
+	"scene": ["💬", "c9b6f2", "6a4bb5"], "menu": ["💬", "c9b6f2", "6a4bb5"], "text": ["💬", "c9b6f2", "6a4bb5"], "event": ["⚡", "f2e05a", "8a7400"],
+	"quest": ["🏁", "f08a6b", "b0431f"], "values": ["🔢", "9fb4c7", "4d6478"], "image": ["🖼", "d7a6c8", "8c4a78"],
+	"form": ["🧬", "8fd3f4", "2a7da3"], "creature": ["⚔", "e07a7a", "a23333"], "zone": ["🧭", "4cc9a4", "0f7a5c"], "region": ["🧭", "4cc9a4", "0f7a5c"],
+	"door": ["🚪", "4cc9a4", "0f7a5c"], "condition": ["❤", "e07a7a", "a23333"], "feat": ["★", "f2e05a", "8a7400"], "ending": ["✦", "f08a6b", "b0431f"],
+	"scenario": ["▶", "f08a6b", "b0431f"], "pack": ["📦", "9fb4c7", "4d6478"], "hook": ["⚡", "f2e05a", "8a7400"],
+}
+
+static func icon(kind: String) -> String:
+	return CATEGORY[kind][0] if CATEGORY.has(kind) else "◇"
+
+static func category_color(kind: String) -> Color:
+	return Color(CATEGORY[kind][2 if light else 1]) if CATEGORY.has(kind) else color("muted")
+
 static func box(fill: String, border: String = "", padding: int = 8, radius: int = 4) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = color(fill)
@@ -126,4 +143,54 @@ static func build() -> Theme:
 	theme.set_stylebox("grabber_area", "HSlider", box("accent", "", 2))
 	for type in ["VBoxContainer", "HBoxContainer"]:
 		theme.set_constant("separation", type, 8)
+	# Story blocks: quiet cards, chips for the parts an author can change.
+	theme.set_type_variation("Block", "PanelContainer")
+	theme.set_stylebox("panel", "Block", box("surface", "border", 6, 6))
+	theme.set_type_variation("BlockSelected", "PanelContainer")
+	var chosen := box("selected", "accent", 6, 6)
+	chosen.set_border_width_all(2)
+	theme.set_stylebox("panel", "BlockSelected", chosen)
+	theme.set_type_variation("BlockProblem", "PanelContainer")
+	var problem := box("surface", "bad", 6, 6)
+	problem.border_width_left = 4
+	theme.set_stylebox("panel", "BlockProblem", problem)
+	theme.set_type_variation("Toast", "PanelContainer")
+	theme.set_stylebox("panel", "Toast", box("raised", "accent", 8, 6))
+	theme.set_type_variation("Card", "PanelContainer")
+	theme.set_stylebox("panel", "Card", box("surface", "border", 12, 8))
+	theme.set_type_variation("Chip", "Button")
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var chip := box("raised" if state in ["normal", "disabled"] else "hover", "accent" if state in ["hover", "pressed", "focus"] else "border", 3, 10)
+		chip.content_margin_left = 8
+		chip.content_margin_right = 8
+		if state == "focus": chip.draw_center = false
+		theme.set_stylebox(state, "Chip", chip)
+	theme.set_color("font_color", "Chip", color("accent"))
+	theme.set_color("font_hover_color", "Chip", color("text"))
+	theme.set_color("font_disabled_color", "Chip", color("text"))
+	theme.set_type_variation("Ghost", "Button")
+	for state in ["normal", "disabled"]:
+		theme.set_stylebox(state, "Ghost", box("surface", "", 4, 4))
+	theme.set_stylebox("hover", "Ghost", box("hover", "", 4, 4))
+	theme.set_stylebox("pressed", "Ghost", box("selected", "", 4, 4))
+	theme.get_stylebox("normal", "Ghost").draw_center = false
+	theme.get_stylebox("disabled", "Ghost").draw_center = false
+	theme.set_color("font_color", "Ghost", color("muted"))
+	theme.set_type_variation("AddRow", "Button")
+	var add := box("bg", "border", 5, 6)
+	add.draw_center = false
+	theme.set_stylebox("normal", "AddRow", add)
+	theme.set_stylebox("hover", "AddRow", box("hover", "accent", 5, 6))
+	theme.set_stylebox("pressed", "AddRow", box("selected", "accent", 5, 6))
+	theme.set_color("font_color", "AddRow", color("muted"))
+	theme.set_type_variation("StoryLabel", "Label")
+	theme.set_font("font", "StoryLabel", font("Literata.ttf"))
+	theme.set_type_variation("CodeLabel", "Label")
+	theme.set_color("font_color", "CodeLabel", color("muted"))
+	var mono := SystemFont.new()
+	mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "monospace"])
+	theme.set_font("font", "CodeLabel", mono)
+	theme.set_font_size("font_size", "CodeLabel", 12)
+	theme.set_type_variation("GoodLabel", "Label")
+	theme.set_color("font_color", "GoodLabel", color("good"))
 	return theme

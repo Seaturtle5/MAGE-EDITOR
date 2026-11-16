@@ -1,113 +1,210 @@
 class_name ConditionBuilder
 extends VBoxContainer
-## Groups compose sentences; the engine checks the resulting condition.
+## A condition as groups of sentences: all of, any of, none of. Sentences come
+## from the block catalog; the engine checks the finished condition.
 
+signal changed
 var workspace: PackWorkspace
-var mode: OptionButton
-var controls: VBoxContainer
-var children_group: VBoxContainer
-var slots: Dictionary = {}
+var root: Dictionary = {"op": "all", "items": []}
+var context: Array = []
+var event := ""
+var chooser: BlockChooser
+var adding_to: Dictionary = {}
+var replacing: Dictionary = {}
+const GROUPS := [["all", "All of these are true"], ["any", "Any one of these is true"], ["none", "None of these is true"]]
 
-func configure(value: PackWorkspace) -> void:
-	workspace = value
-	mode = OptionButton.new()
-	for name: String in ["Counter", "Something remembered", "Carried item", "Quest stage", "Player sex", "Chance", "All of", "Any of", "None of"]: mode.add_item(name)
-	add_child(mode)
-	controls = VBoxContainer.new()
-	add_child(controls)
-	mode.item_selected.connect(func(_index: int) -> void: _rebuild())
-	_rebuild()
+func configure(pack: PackWorkspace, text: String = "", where: Array = [], about_event: String = "") -> void:
+	workspace = pack
+	context = where
+	event = about_event
+	root = _group(BlockCatalog.condition_tree(text)) if not text.strip_edges().is_empty() else {"op": "all", "items": []}
+	if chooser == null:
+		chooser = BlockChooser.new()
+		add_child(chooser)
+		chooser.chosen.connect(_chosen)
+	rebuild()
 
-func _picker(key: String, options: Array) -> OptionButton:
-	var picker := OptionButton.new()
-	for option: String in options: picker.add_item(option)
-	controls.add_child(picker)
-	slots[key] = picker
-	return picker
+static func _group(tree: Dictionary) -> Dictionary:
+	var item := _item(tree)
+	return item if item.op in ["all", "any", "none"] else {"op": "all", "items": [item]}
 
-func _rebuild() -> void:
-	for child: Node in controls.get_children():
-		controls.remove_child(child)
-		child.queue_free()
-	slots.clear()
-	var kind := mode.get_item_text(mode.selected)
-	if kind in ["All of", "Any of", "None of"]:
-		children_group = VBoxContainer.new()
-		controls.add_child(children_group)
-		var add := Button.new()
-		add.text = "+ Condition in this group"
-		add.pressed.connect(_add_child_condition)
-		controls.add_child(add)
-		_add_child_condition()
-		return
-	if kind in ["Counter", "Something remembered"]:
-		var values: Array = []
-		var declarations := workspace.preview_content().values
-		for key: String in declarations:
-			if declarations[key].kind == ("number" if kind == "Counter" else "flag"): values.append(key)
-		if kind == "Counter":
-			for key: String in Game.PLAYER_DEFAULTS:
-				if Game.PLAYER_DEFAULTS[key] is int: values.append("player." + key)
-		values.sort()
-		_picker("value", values)
-		if kind == "Counter":
-			_picker("compare", ["at least", "at most", "equal to", "more than", "less than", "different from"])
-			var amount := SpinBox.new()
-			amount.min_value = -100000
-			amount.max_value = 100000
-			amount.value = 3
-			controls.add_child(amount)
-			slots.amount = amount
-		else: _picker("state", ["yes", "no"])
-	elif kind in ["Carried item", "Quest stage"]:
-		var slot := ContentSlot.new()
-		slot.configure(workspace, "item" if kind == "Carried item" else "quest")
-		controls.add_child(slot)
-		slots.content = slot
-		if kind == "Quest stage":
-			_picker("stage", [])
-			slot.item_selected.connect(func(_index: int) -> void:
-				slots.stage.clear()
-				for stage: String in workspace.preview_content().quests.get(slot.value(), {}).get("stages", []): slots.stage.add_item(stage))
-	elif kind == "Player sex": _picker("sex", ["female", "male", "herm", "neuter"])
-	elif kind == "Chance":
-		var chance := SpinBox.new()
-		chance.min_value = 0
-		chance.max_value = 100
-		chance.value = 50
-		chance.suffix = "%"
-		controls.add_child(chance)
-		slots.chance = chance
+static func _item(tree: Dictionary) -> Dictionary:
+	match str(tree.op):
+		"all", "any": return {"op": tree.op, "items": tree.items.map(func(child: Dictionary) -> Dictionary: return _item(child))}
+		"not":
+			var inner := _item(tree.item)
+			return {"op": "none", "items": inner.items} if inner.op == "any" else {"op": "none", "items": [inner]}
+	return {"op": tree.op, "text": tree.text}
 
-func _add_child_condition() -> void:
-	var row := VBoxContainer.new()
-	children_group.add_child(row)
-	var condition := ConditionBuilder.new()
-	condition.configure(workspace)
-	row.add_child(condition)
-	var remove := Button.new()
-	remove.text = "Remove this condition"
-	remove.pressed.connect(func() -> void:
-		children_group.remove_child(row)
-		row.queue_free())
-	row.add_child(remove)
+static func _tree(item: Dictionary) -> Dictionary:
+	if item.op in ["is", "kept"]: return {"op": "is", "text": item.text}
+	var parts: Array = []
+	for child: Dictionary in item.items:
+		if child.op in ["is", "kept"] or not child.items.is_empty(): parts.append(_tree(child))
+	if item.op == "none": return {"op": "not", "item": parts[0] if parts.size() == 1 else {"op": "any", "items": parts}} if not parts.is_empty() else {"op": "is", "text": ""}
+	if parts.size() == 1: return parts[0]
+	return {"op": item.op, "items": parts} if not parts.is_empty() else {"op": "is", "text": ""}
 
-func _value(key: String) -> String:
-	var picker: OptionButton = slots[key]
-	return picker.get_item_text(picker.selected) if picker.selected >= 0 else ""
-
+## The finished condition; empty while nothing has been added.
 func line() -> String:
-	var kind := mode.get_item_text(mode.selected)
-	match kind:
-		"Counter": return _value("value") + " " + {"at least": ">=", "at most": "<=", "equal to": "=", "more than": ">", "less than": "<", "different from": "!="}[_value("compare")] + " " + str(int(slots.amount.value))
-		"Something remembered": return ("not " if _value("state") == "no" else "") + _value("value")
-		"Carried item": return "player has " + slots.content.value()
-		"Quest stage": return "quest " + slots.content.value() + " is " + _value("stage")
-		"Player sex": return "player is " + _value("sex")
-		"Chance": return "chance " + str(int(slots.chance.value)) + "%"
-		_:
-			var clauses: Array[String] = []
-			for row: Node in children_group.get_children():
-				var child: ConditionBuilder = row.get_child(0)
-				clauses.append("(" + child.line() + ")")
-			return ("not (" if kind == "None of" else "") + (" and " if kind == "All of" else " or ").join(clauses) + (")" if kind == "None of" else "")
+	return BlockCatalog.condition_text(_flat(_tree(root)))
+
+## Joins a group into its parent when both are the same kind.
+static func _flat(tree: Dictionary) -> Dictionary:
+	if tree.op == "not": return {"op": "not", "item": _flat(tree.item)}
+	if tree.op not in ["all", "any"]: return tree
+	var items: Array = []
+	for child: Dictionary in tree.items:
+		var flat := _flat(child)
+		if flat.op == tree.op: items.append_array(flat.items)
+		else: items.append(flat)
+	return {"op": tree.op, "items": items}
+
+func is_empty() -> bool:
+	return line().is_empty()
+
+func rebuild() -> void:
+	for child: Node in get_children():
+		if child == chooser: continue
+		remove_child(child)
+		child.queue_free()
+	add_child(_group_panel(root, {}))
+
+func _group_panel(group: Dictionary, parent: Dictionary) -> Control:
+	var panel := DropPanel.new()
+	panel.theme_type_variation = "Card"
+	panel.accepts = func(data: Dictionary) -> bool: return data.get("mage_kind") == "condition" and data.get("builder") == get_instance_id() and not _inside(data.item, group) and not is_same(data.item, group) and not is_same(data.parent, group)
+	panel.dropped.connect(func(data: Dictionary, _upper: bool) -> void:
+		_take(data.parent, data.item)
+		group.items.append(data.item)
+		_changed())
+	var body := VBoxContainer.new()
+	panel.add_child(body)
+	var head := HBoxContainer.new()
+	body.add_child(head)
+	var mode := OptionButton.new()
+	for pair: Array in GROUPS: mode.add_item(pair[1])
+	mode.select(["all", "any", "none"].find(group.op))
+	mode.item_selected.connect(func(index: int) -> void:
+		group.op = GROUPS[index][0]
+		_changed())
+	head.add_child(mode)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(spacer)
+	if not parent.is_empty():
+		var remove := Button.new()
+		remove.text = "✕"
+		remove.theme_type_variation = "Ghost"
+		remove.tooltip_text = "Remove this group"
+		remove.pressed.connect(func() -> void:
+			_take(parent, group)
+			_changed())
+		head.add_child(remove)
+	if group.items.is_empty(): body.add_child(AuthoringLayout.label("Nothing here yet. Add a condition below.", 13, true))
+	for item: Dictionary in group.items:
+		if item.op in ["all", "any", "none"]:
+			var nested := MarginContainer.new()
+			nested.add_theme_constant_override("margin_left", 14)
+			nested.add_child(_group_panel(item, group))
+			body.add_child(nested)
+			continue
+		body.add_child(_row(item, group))
+	var tools := HBoxContainer.new()
+	body.add_child(tools)
+	var add := Button.new()
+	add.text = "＋ Condition"
+	add.theme_type_variation = "AddRow"
+	add.pressed.connect(add_to.bind(group))
+	tools.add_child(add)
+	var nest := Button.new()
+	nest.text = "＋ Group"
+	nest.theme_type_variation = "AddRow"
+	nest.tooltip_text = "Add a group inside this one, for example “any of” inside “all of”."
+	nest.pressed.connect(func() -> void:
+		group.items.append({"op": "any" if group.op == "all" else "all", "items": []})
+		_changed())
+	tools.add_child(nest)
+	return panel
+
+func _row(item: Dictionary, group: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	var handle := BlockHandle.new()
+	handle.text = "⠿"
+	handle.theme_type_variation = "Ghost"
+	handle.tooltip_text = "Drag into another group"
+	handle.payload = {"mage_kind": "condition", "builder": get_instance_id(), "item": item, "parent": group}
+	row.add_child(handle)
+	var read := BlockCatalog.read_predicate(item.text)
+	if read.is_empty():
+		var kept := AuthoringLayout.label("Kept as written: " + str(item.text), 14, true)
+		kept.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(kept)
+	else:
+		var view := SentenceView.new()
+		view.event = event
+		view.show_sentence(workspace, read.entry, read.slots)
+		view.slot_changed.connect(func(name: String, value: String) -> void:
+			var slots: Dictionary = read.slots.duplicate()
+			slots[name] = value
+			var next := BlockCatalog.render(read.entry, slots)
+			if Condition.compile(next).has("error"): return
+			item.text = next
+			_changed())
+		row.add_child(view)
+		var edit := Button.new()
+		edit.text = "✎"
+		edit.theme_type_variation = "Ghost"
+		edit.tooltip_text = "Change every part of this condition"
+		edit.pressed.connect(func() -> void:
+			replacing = item
+			adding_to = {}
+			chooser.open(workspace, "condition", context, [], read, event))
+		row.add_child(edit)
+	var remove := Button.new()
+	remove.text = "✕"
+	remove.theme_type_variation = "Ghost"
+	remove.tooltip_text = "Remove this condition"
+	remove.pressed.connect(func() -> void:
+		_take(group, item)
+		_changed())
+	row.add_child(remove)
+	return row
+
+static func _take(group: Dictionary, item: Dictionary) -> void:
+	for index in group.items.size():
+		if is_same(group.items[index], item):
+			group.items.remove_at(index)
+			return
+
+static func _inside(ancestor: Dictionary, group: Dictionary) -> bool:
+	if not ancestor.has("items"): return false
+	for child: Dictionary in ancestor.items:
+		if is_same(child, group) or _inside(child, group): return true
+	return false
+
+func add_to(group: Dictionary) -> void:
+	adding_to = group
+	replacing = {}
+	chooser.open(workspace, "condition", context, [], {}, event)
+
+## Adds a condition written in the content format to a group (the outer one by default).
+func add_text(text: String, group: Dictionary = {}) -> String:
+	if Condition.compile(text).has("error"): return "The engine cannot read this condition."
+	var target: Dictionary = group if not group.is_empty() else root
+	var item := _item(BlockCatalog.condition_tree(text))
+	if item.op == target.op and item.has("items"): target.items.append_array(item.items)
+	else: target.items.append(item)
+	_changed()
+	return ""
+
+func _chosen(text: String, _keep_open: bool) -> void:
+	if not replacing.is_empty():
+		replacing.text = " ".join(Condition._words(text))
+		replacing = {}
+		_changed()
+	else: add_text(text, adding_to)
+
+func _changed() -> void:
+	rebuild()
+	changed.emit()

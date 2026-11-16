@@ -74,7 +74,7 @@ static func insert_block(row: Dictionary, before_line: int, indent: String, cont
 	var program := Program.compile("block_draft", parsed.definitions[0].nodes)
 	if not program.errors.is_empty(): return str(program.errors[0].message)
 	var replacement := content.trim_suffix("\n").split("\n")
-	for index in range(replacement.size() - 1, -1, -1): _insert_line(row.doc, lines, before_line - 1, indent + replacement[index])
+	for index in range(replacement.size() - 1, -1, -1): _insert_line(row.doc, lines, before_line - 1, (indent + replacement[index]) if not replacement[index].strip_edges().is_empty() else "")
 	_save_lines(row.doc, lines)
 	return ""
 

@@ -285,6 +285,11 @@ func _build_ui() -> void:
 	story_editor.hide()
 	story_editor.changed.connect(_on_canvas_changed)
 	story_editor.problem.connect(_show_error)
+	story_editor.open_requested.connect(func(type: String, id: String) -> void:
+		for row: Dictionary in workspace.rows:
+			if row.def.id == id and row.def.type in ([type, "menu"] if type == "scene" else [type]) and row.def.mode != "extend":
+				_open_world_content(row)
+				return)
 	story_editor.validated.connect(func() -> void:
 		_refresh_diagnostics()
 		_history_changed())
