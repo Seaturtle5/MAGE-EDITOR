@@ -1,8 +1,8 @@
 # MAGE:EDITOR
 
-MAGE:EDITOR is an offline desktop tool for creating MAGE content packs. It is designed for authors to build stories and game content visually. Work on one pack and load other packs as read-only references.
+MAGE:EDITOR is an offline desktop tool for making MAGE content packs without learning the content format. You work on one pack and can load other packs to use their content. The editor writes ordinary pack files and checks them with the game engine itself.
 
-The editor is in early development. The story board and details forms cover common authoring tasks; visual coverage is not complete yet. Existing content that cannot be edited safely is preserved.
+The editor is in development. Stories, conversations, events and the common content types can be built visually; many settings of the rarer types are still typed. Content the editor cannot show yet is kept exactly as it is.
 
 ## Start
 
@@ -14,64 +14,53 @@ Install Godot 4.7 and Python 3, then run:
 
 `--engine` points to a MAGE checkout containing `engine/`. You can instead set `MAGE_ENGINE`; the launcher also checks a sibling engine folder. To use another Godot executable, set `GODOT` or pass `--godot /path/to/godot`.
 
-The editor stages a copy of the selected engine's content library in a temporary directory. It uses that checkout's parser, schema and validator without modifying the engine. If the example adventure is available, the first launch creates a separate working copy in the editor's user data folder.
+The editor uses the engine's own reader and checker from that checkout, without changing it. If the example adventure is available, the first launch opens a working copy of it.
 
-## Start with Home
+## The window
 
-Opening a pack shows **Home**. Choose a guided task, answer its questions and review before creating. Generic tasks cover conversations, events, items, quests, places, shops and endings. Eight additional templates appear when a pack with ID `core-mechanics` is loaded. The library on the left includes your pack and read-only reference packs.
-
-| Action | How |
+| Where | What |
 |---|---|
-| Undo / redo | Use the toolbar or **Ctrl+Z / Ctrl+Shift+Z** outside a text input. A guided creation, including its links and dependencies, is one undo step. Text inputs keep their own local undo while focused. |
-| Find anything | **Ctrl+K** searches content, story prose, saved values and commands. |
-| Edit story blocks | Choose a story card. The side editor shows its nested blocks; fold containers, drag a handle to move a block, Ctrl-drag to copy, or use the arrow buttons. **Only if…** wraps a block in a guided condition. **Show the line** is optional and remembered. |
-| Preview text | The strip below the blocks uses the engine's text renderer. Choose a sample sex, or **Sample…** to set a form, level and saved values. **Re-roll** changes variations. Sample settings are stored locally per pack. Story actions are skipped; links, page breaks, choices and fights mark preview boundaries. |
-| Use library content | Drop content onto a story card or place, then choose its use. Reference fields also accept matching library drops on **Choose…**; their normal pickers work without dragging. |
-| Add pictures | Drop PNG, JPEG or WebP files onto the window, or choose **Pack → Import image**. Confirm the artist for each import; the last artist is remembered. |
-| Recover edits | Applied pack edits are copied to a local recovery draft every 30 seconds. Reopening the pack offers Restore, Keep for later or Discard. Restoration stops if an original file changed on disk. Unapplied form and writing drafts are not recovered yet. |
-| Get oriented | **Help** beside Home replays the short first-run tour. |
+| Top bar | **Pack** (new, open, add another pack, import a picture), **Undo / Redo**, **Find anything** (Ctrl+K), **Create**, the check result, and **Save**. The gear holds appearance, interface size and the technical views. |
+| Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. |
+| Home | Guided tasks, what you worked on with hints about what it still needs, and problems. |
+| Stories | The board: one card per story, with lines showing how they lead to each other. Select a card to see its blocks in the side editor. **Tidy up** arranges the cards. |
+| Map | Places and the paths between them; what happens at each place. |
+| Details | Everything about the selected content. The small buttons beside its name show where it is used, rename it everywhere, duplicate it and delete it. |
+| Side editor (right) | The selected story as blocks, with a preview underneath. |
+| Status line | What just happened, with **Undo**, and where you are. |
 
-Undo restores text buffers. Undoing a creation after it was saved empties its new file on the next explicit Save; it never deletes a file automatically. Imported picture files remain on disk when their credit edits are undone.
+## Guided tasks
 
-## Work on a pack
+On Home, choose a task: talk to a character, something happens at a place, make an item, start a quest, add a place, open a shop, write an ending. With the Flexible Survival base pack loaded there are eight more. A task asks a few questions page by page and shows what it will make. A place or an area that does not exist yet can be made on the spot from only a name. **Create** makes everything, connected, as one step you can undo.
 
-| Action | How |
+## Stories as blocks
+
+Each block is a sentence. The highlighted parts are chips: choose one to change it, or drop a library entry on it.
+
+| To | Do |
 |---|---|
-| Choose appearance | Use **MAGE Dark / Cream Light** in the top bar. The choice is remembered on this computer. The editor uses MAGE's Barlow interface and Literata story fonts when available in the selected engine checkout; their licences are included with those fonts. |
-| Start or open | Open the **Pack** menu to create or open a pack. The example adventure opens in an editor-owned working copy on first launch. |
-| Create content | Choose **+ Create** and follow **Starting point → Name & opening → Review**. Write an optional opening passage before creating a story, conversation or event. The summary stays visible and Back keeps your draft. An ID is suggested automatically; **More types and ID options** exposes technical choices. |
-| Find content | Choose a content tab and select an entry from your working pack. **Details** has section navigation, Back/Next controls and a persistent **At a glance** summary. Events have separate trigger and condition sections. **Stories** lists searchable interactions; **Add property** opens one property at a time. Story entries open on the board. Find other packs in the library. |
-| Write a conversation | Write in speech bubbles and response cards. Add or remove responses, add conditions or actions, and create single-line variations and conditional text. |
-| Start an interaction | In **Details → Stories**, choose an interaction. A missing plain story opens the writing space directly; applying it creates the passage. Cancelling leaves the source unchanged. |
-| Write longer passages | Choose **Open writing space** below a plain speech or narration bubble. Write and apply several paragraphs in the larger window; cancelling an edited draft asks before discarding it. |
-| Connect stories | Use **Choose next story** on a response to connect an existing passage or create a new story that is linked automatically. You can also drag a response connector to a destination. Drag an automatic continuation or play-and-return connector to change it; right-click a connection to disconnect it. Node positions are saved locally. |
-| Explore places | Open **World map** or choose **Places**. Select a place or its event count to see a side panel of events, people and items. Event cards explain the trigger, requirements and repeat rule; zone events are labelled separately. Drag between places to add a directional exit; right-click a connection to choose an exit to remove. A matching return exit is created by default. Choose one way, or Shift-drag, to create only the outward exit. |
-| Add an event to a place | Choose **+ Add event here** on a place card. The place is selected for you. Choose walking, arrival, fast travel, leaving, exploring, scavenging or a story-started event. Zone triggers apply throughout the selected zone. The creation flow starts at **Name & opening** with the place selected. After creation, use the event’s **When & where**, **Conditions** and **Stories** sections. |
-| Adjust an event | Open the event's **Details**. **Change when & where** offers named places and zones; add another trigger for an alternative way to start it. **Add condition** offers time, items, flags and quest stages. Additional conditions must all pass. **Stories → Event story** opens the story board. Leaving events interrupt the exit; use the **Continue the move** story action when the player should leave. Cross-pack destinations and conditions add their pack dependency. |
-| Find a property | In **Details → Properties**, search by name or purpose and filter by category. Existing and available properties appear together, with explanations and controls. Browsing changes nothing. |
-| Make food heal or mutate | Open the item's **Use & reactions**, then **+ Add reaction → Restore health** and choose an amount. Hunger, thirst, damage and attribute changes use the same chooser. **Food mutation → Choose mutation form** selects a loaded form and respects food-infection protections. Scripted gradual mutation and full transformation are separate choices under **Body changes**. |
-| Review item behavior | **Use & reactions** shows story text, reactions and their conditions in order. Click a reaction to replace it or choose **Remove**. **Consumption & combat settings** controls whether one item is used up and whether it can be used in a fight. Food is used up by default; no extra take-item action is needed. |
-| Add story steps | Use the buttons on a node to add speech, a response, an action, a pause, or a story to play and return from. Action and condition choosers have categories, search and a preview of their scope. Item and number changes have an amount control. Number conditions offer at least, at most and equal thresholds; time controls record a moment and check turns passed, and lists can be checked for entries. Unrecorded times count as long ago. Nothing is added until confirmed. |
-| Use another pack | **Pack → Add reference pack** loads its definitions read-only. **Show library** opens a searchable panel with pack filters, values and problems. Reference selectors and story actions can use other packs and add the dependency to your working pack. |
-| Create saved values | In **Details → Settings**, edit a values section with Flag, Number, Text, Time, States and List controls. Each explains its starting behavior; numbers have optional normal and fight limits. Apply entries before leaving, or choose **Discard entry edits**. Errors stay beside your draft. |
-| Add art | **Import image** copies artwork and adds an artist credit. On a story card, **Choose opening image** previews and selects artwork from loaded packs. Click an existing image step to replace it, or **Remove** to delete that step. Images are optional. |
-| Focus on an interaction | The story board shows its pack, content, interaction and card count. **Focus only** hides neighboring stories; switch it off to reconnect them. **Content details & interactions** returns to the owning content. |
-| Add temporary bonuses | Create a **condition**, then open **Details → Temporary bonuses**. Add named attribute changes and apply them. From a story or item, **Add action → Temporary conditions** applies the condition for a chosen duration. Response conditions can check whether it is active. |
-| Check and save | **Check pack** checks the loaded packs, including unsaved changes, using the engine and opens the problems panel. **Save all** writes changed files in the working pack. |
+| Add | **＋ Text**, **＋ Action** or **＋ More** at the place you want it. Action opens "What should happen?": search with everyday words (heal, trust, teleport), fill in the sentence, **Add** or **Add & next**. You can also type a line you know. |
+| Write | Double-click a text block. **Insert** adds a name, he or she, or a counter's number; **Vary** and **Only if…** wrap the selected words. Ctrl+Enter keeps the text, Esc cancels. |
+| Make it conditional | **⋯ → Only if…** puts the block (or all selected blocks) inside a condition. Conditions are built from sentences in groups: all of, any of, none of. Add **Otherwise, if…** and **Otherwise** from the condition's own menu. |
+| Move | Drag the handle; hold Ctrl to copy. Or use **⋯ → Move up / Move down**, Alt+↑ / Alt+↓, or cut and paste. Shift-click and Ctrl-click select several blocks. |
+| Copy between stories | Copy and paste work as lines of the content format, also to and from a text editor. |
+| Understand | **⋯ → Explain** says what a block does. **Show the line** shows the content format's line under every block. |
+| Preview | The strip under the blocks shows the text as a sample player reads it. Conditions are marked taken or skipped for that sample. Actions are not applied; the preview stops at responses, pauses, links and fights. |
 
-Imported images are copied immediately; content changes stay in memory until saved. Saving stops if a content file changed on disk since it was opened. Save operations across several files are not one transaction.
+Some actions only work in certain stories (a fight action, "keep the item"). They are hidden elsewhere; **Show all** lists them greyed out with the reason.
 
-## Example: warmth restores health for a while
+## Safety
 
-1. Create a **condition** named **Warmed up**.
-2. In **Temporary bonuses**, choose **+ Add repeated reaction → Restore health**, enter **5**, then **Add action**.
-3. Open an item's **Use & reactions**. Add a reaction under **Temporary conditions**, choose **Warmed up**, and set **Duration in turns** to **3**.
-4. Check the pack and save.
+- Every change is one step in Undo, named after what it did. Save is separate and explicit.
+- Unsaved changes are copied to a recovery draft every 30 seconds and offered after a crash.
+- **Rename** lists every line that will change before anything changes. Prose is not touched; a rename that would break something is taken back.
+- **Delete** shows what uses the content and can remove the actions and links that use it.
+- Saving stops if a file changed on disk since it was opened. Other packs are never changed.
 
-This adds 5 HP on two active turns, up to maximum health. The third turn expires the condition without another healing action. Restored HP remains; applying the same condition again extends its duration. For a reversible attribute bonus, use **+ Add bonus** instead. Flat temporary HP bonuses are not supported by the current engine; stamina affects health through the game's own rules.
+## Not finished
 
-New story-wide actions run before the first set of player responses or final story link, after preceding steps. Response actions run when that response is chosen. Earlier branches can skip later actions; the board preserves their order.
-
-## Current limits
-
-The board can edit plain text passages, create and edit common single-line variations, manage common response conditions and actions, and change existing direct and play-and-return links. The larger writing space currently edits plain passages; complex dynamic passages still need further visual controls. The world map shows direct exits and dangerous doors, but does not yet edit doors or game map coordinates. Event controls cover the engine's common place and zone triggers; unfamiliar clauses and complex source layouts are preserved. Hooks and events started only by stories are not included in place event counts. Conditional and fight branches, engine actions, and nested properties are not all visually editable yet. Unsupported content is preserved. Node positions on either board are stored on this computer and do not change the game's map coordinates. The side editor and live text preview are an initial implementation: multi-select, arbitrary container creation, rich prose tools and the complete action catalog remain unfinished. The board retains its existing writing controls. A game playtest and coordinated ID renaming are not available yet. The optional **Advanced** switch exposes technical views during development; they are not the intended authoring workflow.
+- Settings of the rarer content types (most rules, nested settings such as equipment or body parts) are typed in the format's words in a text box.
+- A calculation is typed as a short formula inside its block; lists of entries are typed with commas.
+- The map does not edit doors, regions or map positions.
+- There is no playtest in the real game yet, no find and replace, and no view of how packs depend on each other.
+- The Details forms still use an older design than the side editor.
