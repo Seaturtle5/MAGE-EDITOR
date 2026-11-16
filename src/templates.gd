@@ -15,6 +15,7 @@ const CONTENT := ["location", "zone", "form", "item", "image", "creature", "char
 const INLINE := {
 	"location": "== location {{id}}\nname: {{name}}\nzone: none\ndescription: Describe this place.",
 	"zone": "== zone {{id}}\nname: {{name}}",
+	"form": "== form {{id}}\nname: {{name}}\nbody type: humanoid\nscale: 3",
 }
 const NEW := "+"
 

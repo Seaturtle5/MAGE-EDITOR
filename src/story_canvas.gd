@@ -319,7 +319,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 	for entry: Dictionary in entries:
 		var kind: String = entry.node.kind
 		if counts.has(kind): counts[kind] += 1
-		if kind == "text" and first.is_empty(): first = Wording.prose(_display_dynamic(str(entry.node.text)))
+		if kind == "text" and first.is_empty(): first = Wording.words(str(entry.node.text), workspace)
 	for passage: Dictionary in StoryGraph.script_nodes(row):
 		if passage.kind == "play" and not StoryGraph.play_target(passage).is_empty(): calls.append(passage)
 	var excerpt := AuthoringLayout.label(first if first.length() <= 150 else first.left(148) + "…", 14, first.is_empty())
@@ -367,6 +367,10 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 	if row.doc.writable and d.type in ["scene", "menu"] and not row.has("script_field") and workspace.uses(d.id).is_empty():
 		var hint := AuthoringLayout.label("⚠ Nothing leads here yet", 12, true)
 		card.add_child(hint)
+	# Wrapping labels first measure too tall; the card takes its real height once laid out.
+	card.reset_size.call_deferred()
+	get_tree().process_frame.connect(func() -> void:
+		if is_instance_valid(card): card.reset_size(), CONNECT_ONE_SHOT)
 
 func _build_card(card: GraphNode, row: Dictionary) -> void:
 	if not detailed_cards:

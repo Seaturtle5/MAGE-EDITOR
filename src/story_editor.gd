@@ -286,11 +286,23 @@ func _leaf(entry: Dictionary, host: VBoxContainer) -> void:
 	match str(node.kind):
 		"text":
 			var bar := _bar(entry, body, "💬")
-			var prose := AuthoringLayout.label(str(node.text) if show_line.button_pressed else Wording.prose(StoryCanvas._display_dynamic(str(node.text))), 15)
-			prose.theme_type_variation = "StoryLabel"
+			var prose := RichTextLabel.new()
+			prose.bbcode_enabled = not show_line.button_pressed
+			prose.fit_content = true
+			prose.scroll_active = false
+			prose.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			prose.selection_enabled = false
+			prose.add_theme_font_override("normal_font", EditorTheme.font("Literata.ttf"))
+			prose.add_theme_font_override("italics_font", EditorTheme.font("Literata-Italic.ttf"))
+			prose.add_theme_font_override("bold_font", EditorTheme.font("Literata.ttf"))
+			prose.add_theme_font_size_override("normal_font_size", 15)
+			prose.add_theme_font_size_override("italics_font_size", 15)
+			prose.add_theme_font_size_override("bold_font_size", 15)
+			prose.add_theme_color_override("default_color", EditorTheme.color("text"))
+			prose.text = str(node.text) if show_line.button_pressed else Wording.marked(str(node.text), workspace)
 			prose.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			prose.mouse_filter = Control.MOUSE_FILTER_PASS
-			prose.tooltip_text = "Double-click to write here."
+			prose.tooltip_text = "Double-click to write here. Coloured words change with the game: a name, a condition, one of several versions."
 			bar.add_child(prose)
 			if writable:
 				var write := _ghost("✎", "Write (or double-click the text)")
@@ -322,7 +334,7 @@ func _leaf(entry: Dictionary, host: VBoxContainer) -> void:
 			var flow := HFlowContainer.new()
 			flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			bar.add_child(flow)
-			flow.add_child(_plain("Continue with" if node.kind == "goto" else "Play"))
+			flow.add_child(_plain("Then" if node.kind == "goto" else "Play"))
 			var picker := _story_picker(node.kind == "goto")
 			picker.set_value(target)
 			picker.disabled = not writable or (node.kind == "play" and target.is_empty())
@@ -368,12 +380,12 @@ func _story_picker(with_endings: bool) -> PickerButton:
 	picker.workspace = workspace
 	picker.drop_kinds = ["scene", "menu"]
 	picker.allow_typing = true
-	picker.label_for = func(id: String) -> String: return {"back": "the conversation (return to the list of responses)", "end": "nothing: end here"}.get(id, BlockCatalog.content_label("scene", id, workspace))
+	picker.label_for = func(id: String) -> String: return {"back": "go back to the list of responses", "end": "the story ends here"}.get(id, ("continue with " if with_endings else "") + BlockCatalog.content_label("scene", id, workspace))
 	picker.options = func() -> Array:
 		var result: Array = []
 		if with_endings:
-			result.append({"value": "back", "label": "the conversation (return to the list of responses)"})
-			result.append({"value": "end", "label": "nothing: end here"})
+			result.append({"value": "back", "label": "go back to the list of responses"})
+			result.append({"value": "end", "label": "the story ends here"})
 		for other: Dictionary in workspace.rows:
 			if other.def.type in ["scene", "menu"] and other.def.mode != "extend":
 				result.append({"value": other.def.id, "label": Wording.title(other), "detail": "" if other.doc.writable else str(other.pack)})

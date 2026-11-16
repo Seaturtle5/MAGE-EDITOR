@@ -2201,7 +2201,7 @@ func _show_tour() -> void:
 	AuthoringLayout.popup(tour, Vector2i(520, 260))
 
 func _update_tour() -> void:
-	var steps := ["1 / 5 · Library\nFind people, items, places and pictures on the left. Choose an entry or drag it to a matching picker.", "2 / 5 · Home tasks\nChoose a task on Home. Write names and prose, choose the links, then review before creating.", "3 / 5 · Stories\nThe board connects stories. Click a passage to write; responses can lead to another story or return.", "4 / 5 · Preview\nChoose a sample player under the side editor to preview text. Story actions are not applied.", "5 / 5 · Check and save\nCheck pack finds engine problems. Save all writes your changes. Undo, Redo and recovery drafts help you recover edits."]
+	var steps := ["1 / 5 · The library\nOn the left is everything in your pack, by kind, and the other packs you loaded. Choose an entry to open it, or drag it into a story or onto the map.", "2 / 5 · Home\nChoose a task on Home: talk to a character, make an item, start a quest. A task asks a few questions and builds the pieces, connected. One Undo takes it all back.", "3 / 5 · Stories and blocks\nOn Stories, each card is a story. Select one to see its blocks on the right. Every block is a sentence; the coloured parts can be changed. Add with + Text, + Action or + More.", "4 / 5 · Preview and Play\nUnder the blocks you read the story as a sample player would. Play, in the top bar, starts the real game on your pack with its own saves.", "5 / 5 · Check and save\nThe tick in the top bar checks your pack with the game engine. Save writes your changes. Every change can be undone, and unsaved work is kept for you if something goes wrong."]
 	tour_text.text = steps[tour_step]
 
 
