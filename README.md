@@ -20,7 +20,7 @@ The editor uses the engine's own reader and checker from that checkout, without 
 
 | Where | What |
 |---|---|
-| Top bar | **Pack** (new, open, add another pack, import a picture), **Undo / Redo**, **Find anything** (Ctrl+K), **Create**, the check result, and **Save**. The gear holds appearance, interface size and the technical views. |
+| Top bar | **Pack** (new, open, add another pack, import a picture), **Undo / Redo**, **Find anything** (Ctrl+K), **Create**, **Play**, the check result, and **Save**. The gear holds appearance, interface size and the technical views. |
 | Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. |
 | Home | Guided tasks, what you worked on with hints about what it still needs, and problems. |
 | Stories | The board: one card per story, with lines showing how they lead to each other. Select a card to see its blocks in the side editor. **Tidy up** arranges the cards. |
@@ -49,6 +49,12 @@ Each block is a sentence. The highlighted parts are chips: choose one to change 
 
 Some actions only work in certain stories (a fight action, "keep the item"). They are hidden elsewhere; **Show all** lists them greyed out with the reason.
 
+## Try it in the game
+
+**▶ Play** in the top bar starts the real game on your pack as it is now, unsaved changes included, in its own window: from a starting point of the game, at the selected place, or straight into the story you are working on (**▶ Try it** above the blocks does the same). The story plays for the sample player chosen in the preview. The game uses its own saves and settings for this; your own saves and the other packs are not touched. A pack with problems is not started; the first problem is shown instead.
+
+The game is taken from the engine checkout the editor was started with (`--engine`).
+
 ## Safety
 
 - Every change is one step in Undo, named after what it did. Save is separate and explicit.
@@ -62,5 +68,6 @@ Some actions only work in certain stories (a fight action, "keep the item"). The
 - Settings of the rarer content types (most rules, nested settings such as equipment or body parts) are typed in the format's words in a text box.
 - A calculation is typed as a short formula inside its block; lists of entries are typed with commas.
 - The map does not edit doors, regions or map positions.
-- There is no playtest in the real game yet, no find and replace, and no view of how packs depend on each other.
+- Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.
+- There is no find and replace, and no view of how packs depend on each other.
 - The Details forms still use an older design than the side editor.

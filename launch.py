@@ -43,7 +43,9 @@ def main():
         if result.returncode or "SCRIPT ERROR" in result.stdout or "Parse Error" in result.stdout:
             print(result.stdout)
             return result.returncode or 1
-        return subprocess.run([args.godot, "--path", staging, *forwarded]).returncode
+        # The editor starts the game from this checkout when the author tries the pack.
+        environment = dict(os.environ, MAGE_ENGINE_PATH=str(engine.resolve()))
+        return subprocess.run([args.godot, "--path", staging, *forwarded], env=environment).returncode
 
 
 if __name__ == "__main__":

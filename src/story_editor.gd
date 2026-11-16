@@ -7,6 +7,7 @@ signal changed(row: Dictionary)
 signal problem(message: String)
 signal validated
 signal open_requested(type: String, id: String)
+signal try_requested(row: Dictionary)
 
 const OUTCOMES := {"won": "If the player wins", "lost": "If the player loses", "fled": "If the player flees", "won by seduction": "If the player wins by seduction", "lost by submitting": "If the player gives in"}
 const STORY_NAMES := {"": "Story", "play": "Event story", "talk": "Conversation", "use": "Use story", "encounter": "Encounter", "victory": "If the creature wins", "defeated": "If the creature is defeated", "intro": "Opening", "enter": "On entering", "do": "What happens"}
@@ -18,6 +19,7 @@ var heading: Label
 var blocks: VBoxContainer
 var block_scroll: ScrollContainer
 var show_line: CheckButton
+var try_button: Button
 var preview: StoryPreview
 var folded: Dictionary = {}
 var entries: Array[Dictionary] = []
@@ -48,6 +50,13 @@ func _ready() -> void:
 	heading.autowrap_mode = TextServer.AUTOWRAP_OFF
 	heading.clip_text = true
 	top.add_child(heading)
+	try_button = Button.new()
+	try_button.text = "▶ Try it"
+	try_button.theme_type_variation = "Ghost"
+	try_button.tooltip_text = "Play this story in the real game, for the sample player of the preview. The game opens in its own window with its own saves."
+	try_button.pressed.connect(func() -> void:
+		if not row.is_empty(): try_requested.emit(row))
+	top.add_child(try_button)
 	show_line = CheckButton.new()
 	show_line.text = "Show the line"
 	show_line.tooltip_text = "Show the line of the content format under each block."
@@ -120,6 +129,7 @@ func refresh() -> void:
 		var current := workspace.find_row(row.doc.path, row.def.type, row.def.id, row.def.mode, row.get("ordinal", 0))
 		if not current.is_empty() and row.has("script_field"): current.script_field = row.script_field
 		row = current
+	try_button.visible = not row.is_empty() and Playtest.problem().is_empty() and not Playtest.story_id(row).is_empty()
 	if row.is_empty():
 		heading.text = "Choose a story"
 		blocks.add_child(AuthoringLayout.label("Choose a story card on the board, or an entry in the library, to see its blocks here.", 15, true))

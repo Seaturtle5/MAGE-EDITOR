@@ -99,6 +99,8 @@ var toast_undo: Button
 var crumbs: Label
 var actions: ContentActions
 var content_tools: HBoxContainer
+var playtest := Playtest.new()
+var play_menu: MenuButton
 const SCALES := [90, 100, 110, 125, 150]
 const GROUP_ICONS := {"Events": "⚡", "Stories": "💬", "Items": "🎒", "Characters": "👤", "Creatures": "⚔", "Places": "📍", "Quests": "🏁", "Rules": "🔢", "Other": "…", "Pack": "📦", "Files": "🗎"}
 
@@ -214,6 +216,13 @@ func _build_ui() -> void:
 	var create := _button("＋ Create", _show_new, "Create a story, character, item or other content.")
 	create.theme_type_variation = "PrimaryButton"
 	bar.add_child(create)
+	play_menu = MenuButton.new()
+	play_menu.text = "▶ Play"
+	play_menu.flat = false
+	play_menu.tooltip_text = "Try your pack in the real game, in its own window with its own saves."
+	play_menu.about_to_popup.connect(_fill_play_menu)
+	play_menu.get_popup().id_pressed.connect(_play_chosen)
+	bar.add_child(play_menu)
 	check_state = _button("✓ Check", _validate, "Check the pack with the game engine and list any problems.")
 	bar.add_child(check_state)
 	save_state = _button("💾 Saved", _save_all, "Write your changes to the pack's files (Ctrl+S).")
@@ -368,6 +377,7 @@ func _build_ui() -> void:
 	story_editor.hide()
 	story_editor.changed.connect(_on_canvas_changed)
 	story_editor.problem.connect(_show_error)
+	story_editor.try_requested.connect(func(row: Dictionary) -> void: _play({"start": Playtest.place_for(workspace, row)}, Playtest.story_id(row)))
 	story_editor.open_requested.connect(func(type: String, id: String) -> void:
 		for row: Dictionary in workspace.rows:
 			if row.def.id == id and row.def.type in ([type, "menu"] if type == "scene" else [type]) and row.def.mode != "extend":
@@ -666,6 +676,52 @@ func _set_status(text: String, undoable: bool = false) -> void:
 	status.text = text
 	toast_undo.visible = undoable and workspace.history.cursor > 0
 
+var play_choices: Array[Dictionary] = []
+
+func _fill_play_menu() -> void:
+	var popup := play_menu.get_popup()
+	popup.clear()
+	play_choices.clear()
+	var add := func(label: String, begin: Dictionary, play: String) -> void:
+		popup.add_item(label, play_choices.size())
+		play_choices.append({"begin": begin, "play": play})
+	var story: Dictionary = story_editor.row if tabs.current_tab == 3 and story_editor != null else {}
+	if not story.is_empty() and not Playtest.story_id(story).is_empty():
+		add.call("Try this story: " + Wording.title(story) + " › " + StoryEditor.story_name(story), {"start": Playtest.place_for(workspace, story)}, Playtest.story_id(story))
+	if not selected.is_empty() and selected.has("def") and selected.def.type == "location":
+		add.call("Start at this place: " + Wording.title(selected), {"start": selected.def.id}, "")
+	var scenarios := Playtest.scenarios(workspace)
+	for index in mini(scenarios.size(), 6):
+		add.call("Play from the start: " + Wording.title(scenarios[index]), {"scenario": scenarios[index].def.id}, "")
+	if scenarios.is_empty() and play_choices.is_empty():
+		add.call("Start in a place of your pack", {"start": Playtest.place_for(workspace, {})}, "")
+	if playtest.running():
+		popup.add_separator()
+		popup.add_item("Stop the game", 1000)
+	popup.add_separator()
+	popup.add_item("The game opens in its own window, with its own saves.", 1001)
+	popup.set_item_disabled(popup.item_count - 1, true)
+
+func _play_chosen(id: int) -> void:
+	if id == 1000:
+		playtest.stop()
+		_set_status("The game was stopped.")
+		return
+	if id < 0 or id >= play_choices.size(): return
+	_play(play_choices[id].begin, str(play_choices[id].play))
+
+## Starts the real game on the pack as it is now, for the preview's sample player.
+func _play(begin: Dictionary, play: String = "") -> void:
+	if not _entries_ready(): return
+	var preview := story_editor.preview
+	var sample := {"sex": ["female", "male", "herm", "neuter"][preview.sample.selected], "level": preview.sample_level, "values": preview.overrides} if not play.is_empty() else {}
+	var error := playtest.run(workspace, begin, play, sample)
+	_refresh_diagnostics()
+	if not error.is_empty():
+		_show_error(error)
+		return
+	_set_status("The game is starting in its own window" + (", with your unsaved changes" if workspace.dirty_count() > 0 else "") + ". It uses its own saves; nothing here changes.")
+
 ## Where the author is: pack, kind, content and story.
 func _refresh_crumbs() -> void:
 	if crumbs == null: return
@@ -742,6 +798,8 @@ func _confirmed() -> void:
 		_open_target(pending_path)
 	elif pending_action == "quit":
 		if not recovery_pending: drafts.discard(workspace.target)
+		playtest.stop()
+		playtest.clear()
 		get_tree().quit()
 	elif pending_action == "delete":
 		_delete_selected()
@@ -751,6 +809,8 @@ func _notification(what: int) -> void:
 		if not _entries_ready():
 			return
 		if workspace.dirty_count() == 0:
+			playtest.stop()
+			playtest.clear()
 			get_tree().quit()
 		else:
 			pending_action = "quit"
