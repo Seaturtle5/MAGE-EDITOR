@@ -1646,6 +1646,11 @@ func _build_world_tab() -> void:
 	world_canvas.selected.connect(_select_world_place)
 	world_canvas.open_requested.connect(_open_world_content)
 	world_canvas.event_requested.connect(_create_world_event)
+	world_canvas.place_requested.connect(func() -> void:
+		for template: Dictionary in AuthorTemplates.available(workspace):
+			if template.id == "place":
+				_start_task(template)
+				return)
 
 func _create_world_event(place: Dictionary) -> void:
 	_show_new()

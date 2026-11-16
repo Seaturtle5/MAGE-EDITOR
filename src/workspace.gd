@@ -463,13 +463,21 @@ func require_condition(condition: Dictionary) -> String:
 	elif condition.get("op") == "quest": error = require_content("quest", condition.quest)
 	return error
 
-func connect_places(source: Dictionary, destination: Dictionary, direction: String, two_way: bool = true) -> String:
+## Connects two places, both ways by default. With `door` (name, locked) a
+## door is made for the way between them, in the same undo step.
+func connect_places(source: Dictionary, destination: Dictionary, direction: String, two_way: bool = true, door: Dictionary = {}) -> String:
 	const OPPOSITE := {"north": "south", "northeast": "southwest", "east": "west", "southeast": "northwest", "south": "north", "southwest": "northeast", "west": "east", "northwest": "southeast", "up": "down", "down": "up", "inside": "outside", "outside": "inside"}
 	if direction not in OPPOSITE or source.is_empty() or destination.is_empty(): return "Choose two places and a direction."
 	if source.def.id == destination.def.id: return "Choose two different places."
 	var pairs: Array = [[source, destination, direction]]
 	if two_way: pairs.append([destination, source, OPPOSITE[direction]])
-	return transaction("Connect " + Wording.title(source) + " and " + Wording.title(destination), func() -> String:
+	return transaction("Connect " + Wording.title(source) + " and " + Wording.title(destination) + (" through " + str(door.name) if not door.is_empty() else ""), func() -> String:
+		var door_id := ""
+		if not door.is_empty():
+			if str(door.get("name", "")).strip_edges().is_empty(): return "Give the door a name."
+			door_id = unique_id(str(door.name), "door")
+			var made := create_definition("door", door_id, "define", "name: " + str(door.name).strip_edges() + "\nlocked: " + ("yes\nlocked text: It is locked." if door.get("locked", false) else "no"))
+			if not made.is_empty(): return made
 		for pair: Array in pairs:
 			var from: Dictionary = pair[0]
 			var to: Dictionary = pair[1]
@@ -482,7 +490,7 @@ func connect_places(source: Dictionary, destination: Dictionary, direction: Stri
 			var writable: Dictionary = {}
 			for candidate: Dictionary in rows:
 				if candidate.doc.writable and candidate.def.type == "location" and candidate.def.id == from.def.id: writable = candidate
-			var entry: String = pair[2] + ": " + to.def.id + (", one way" if not two_way else "")
+			var entry: String = pair[2] + ": " + to.def.id + (", door " + door_id if not door_id.is_empty() else "") + (", one way" if not two_way else "")
 			var error := ""
 			if writable.is_empty(): error = create_definition("location", from.def.id, "extend", "exits:\n    " + entry)
 			else:

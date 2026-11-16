@@ -7,6 +7,7 @@ signal open_requested(row: Dictionary)
 signal changed(row: Dictionary)
 signal problem(message: String)
 signal event_requested(place: Dictionary)
+signal place_requested
 
 const DIRECTIONS := ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest", "up", "down", "inside", "outside"]
 
@@ -28,6 +29,9 @@ var remove_exit_options: OptionButton
 var inspector: VBoxContainer
 var inspected_id := ""
 var places_by_id: Dictionary = {}
+var door_check: CheckButton
+var door_name: LineEdit
+var door_locked: CheckButton
 
 func _ready() -> void:
 	var toolbar := HBoxContainer.new()
@@ -35,13 +39,25 @@ func _ready() -> void:
 	title.text = "PLACES & CONNECTIONS"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toolbar.add_child(title)
+	var add_place := Button.new()
+	add_place.text = "＋ Place"
+	add_place.tooltip_text = "Add a new place to the map."
+	add_place.pressed.connect(func() -> void: place_requested.emit())
+	toolbar.add_child(add_place)
+	var arrange := Button.new()
+	arrange.text = "Arrange as in the game"
+	arrange.tooltip_text = "Lay the places out as the game's own map does: north up, east right, from their exits."
+	arrange.pressed.connect(arrange_like_game)
+	toolbar.add_child(arrange)
 	var fit := Button.new()
 	fit.text = "Fit places"
 	fit.pressed.connect(_fit_places)
 	toolbar.add_child(fit)
 	add_child(toolbar)
 	var hint := Label.new()
-	hint.text = "Drag a right connector to add an exit; right-click a connection to remove an exit. Labels show each direction."
+	hint.text = "Drag from the dot on a place to another place to connect them, with or without a door. Right-click a connection to remove an exit. Select a place to set its area and region."
+	hint.theme_type_variation = "MutedLabel"
+	hint.add_theme_font_size_override("font_size", 13)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(hint)
 	graph = DropSurface.new()
@@ -91,6 +107,19 @@ func _build_dialogs() -> void:
 	var note := Label.new()
 	note.text = "A matching return exit is created by default. Shift-drag chooses one way."
 	form.add_child(note)
+	door_check = CheckButton.new()
+	door_check.text = "Through a door"
+	form.add_child(door_check)
+	door_name = LineEdit.new()
+	door_name.placeholder_text = "Name of the door, for example Cellar door"
+	form.add_child(door_name)
+	door_locked = CheckButton.new()
+	door_locked.text = "Locked at first (a story unlocks it)"
+	form.add_child(door_locked)
+	door_check.toggled.connect(func(on: bool) -> void:
+		door_name.visible = on
+		door_locked.visible = on
+		if on: door_name.grab_focus())
 	exit_dialog.add_child(form)
 	exit_dialog.confirmed.connect(_add_exit)
 	add_child(exit_dialog)
@@ -352,6 +381,11 @@ func _request_exit(from: StringName, _from_port: int, to: StringName, _to_port: 
 		return
 	direction.select(first_available)
 	one_way.button_pressed = Input.is_key_pressed(KEY_SHIFT)
+	door_check.button_pressed = false
+	door_name.text = ""
+	door_name.hide()
+	door_locked.button_pressed = false
+	door_locked.hide()
 	exit_dialog.title = "Connect %s → %s" % [_title(exit_source), _title(exit_target)]
 	exit_dialog.popup_centered()
 
@@ -401,12 +435,88 @@ func _remove_exit() -> void:
 	changed.emit(workspace.find_row(current.doc.path, "location", current.def.id, current.def.mode, current.get("ordinal", 0)))
 
 func _add_exit() -> void:
-	var error := workspace.connect_places(exit_source, exit_target, DIRECTIONS[direction.selected], not one_way.button_pressed)
+	var door := {"name": door_name.text, "locked": door_locked.button_pressed} if door_check.button_pressed else {}
+	var error := workspace.connect_places(exit_source, exit_target, DIRECTIONS[direction.selected], not one_way.button_pressed, door)
 	if not error.is_empty():
 		problem.emit(error)
 		return
 	var updated := workspace.find_row(exit_source.doc.path, "location", exit_source.def.id, exit_source.def.mode, exit_source.get("ordinal", 0))
 	changed.emit(updated)
+
+## Places the cards as the game's own map lays the places out, one group
+## of places beside the next.
+func arrange_like_game() -> void:
+	var layout := MapLayout.build(workspace.preview_content())
+	var offset := 0.0
+	var groups: Array = layout.members.keys()
+	groups.sort()
+	for key: String in groups:
+		var low := Vector2i(1000000, 1000000)
+		var high := Vector2i(-1000000, -1000000)
+		for id: String in layout.members[key]:
+			var cell: Vector2i = layout.position.get(id, Vector2i.ZERO)
+			low = Vector2i(mini(low.x, cell.x), mini(low.y, cell.y))
+			high = Vector2i(maxi(high.x, cell.x), maxi(high.y, cell.y))
+		for id: String in layout.members[key]:
+			var cell: Vector2i = layout.position.get(id, Vector2i.ZERO)
+			positions[id] = Vector2(40 + offset + (cell.x - low.x) * 330.0, 60 + (cell.y - low.y) * 250.0)
+		offset += (high.x - low.x + 1) * 330.0 + 120.0
+	var folder := _layout_file().get_base_dir()
+	DirAccess.make_dir_recursive_absolute(folder)
+	var config := ConfigFile.new()
+	for id: String in positions: config.set_value("nodes", id, positions[id])
+	config.save(_layout_file())
+	refresh()
+	_fit_places.call_deferred()
+
+## A picker for the area or region of a place, with a way to make a new one.
+func _place_setting(place: Dictionary, key: String, type: String, caption: String, none: String) -> void:
+	_inspector_label(caption, inspector, 13)
+	var picker := PickerButton.new()
+	picker.workspace = workspace
+	picker.drop_kinds = [type]
+	picker.placeholder = none
+	picker.text = none
+	picker.disabled = not place.doc.writable
+	picker.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	picker.options = func() -> Array:
+		var result: Array = [{"value": "", "label": none}]
+		for row: Dictionary in workspace.rows:
+			if row.def.type == type and row.def.mode != "extend": result.append({"value": row.def.id, "label": Wording.title(row), "detail": "" if row.doc.writable else str(row.pack)})
+		return result
+	picker.commands = [{"label": "＋ New " + Wording.name(type) + "…", "action": func() -> void:
+		var dialog := ConfirmationDialog.new()
+		dialog.title = "New " + Wording.name(type)
+		dialog.ok_button_text = "Create"
+		var input := LineEdit.new()
+		input.placeholder_text = "Name"
+		input.custom_minimum_size.x = 300
+		dialog.add_child(input)
+		dialog.register_text_enter(input)
+		dialog.confirmed.connect(func() -> void:
+			if input.text.strip_edges().is_empty(): return
+			var id := workspace.unique_id(input.text, type)
+			var error := workspace.transaction("New %s %s" % [Wording.name(type), input.text.strip_edges()], func() -> String: return workspace.create_definition(type, id, "define", "name: " + input.text.strip_edges()))
+			if not error.is_empty(): problem.emit(error)
+			else: picker.choose(id)
+			dialog.queue_free())
+		dialog.canceled.connect(dialog.queue_free)
+		add_child(dialog)
+		dialog.popup_centered()
+		input.grab_focus()}]
+	var current := _field(place, key)
+	picker.set_value("" if current == "none" else current)
+	picker.picked.connect(func(id: String) -> void:
+		var row := workspace.find_row(place.doc.path, "location", place.def.id, place.def.mode, place.get("ordinal", 0))
+		if row.is_empty(): return
+		var error := workspace.transaction("Set the %s of %s" % [Wording.name(type), _title(row)], func() -> String:
+			var issue: String = row.doc.set_field(row.def, key, id if not id.is_empty() else "none") if key == "zone" or not id.is_empty() else row.doc.remove_simple_field(row.def, key)
+			return issue if not issue.is_empty() or id.is_empty() else workspace.require_content(type, id))
+		if not error.is_empty():
+			problem.emit(error)
+			return
+		changed.emit(workspace.find_row(row.doc.path, "location", row.def.id, row.def.mode, row.get("ordinal", 0))))
+	inspector.add_child(picker)
 
 func _show_contents(row: Dictionary) -> void:
 	inspected_id = row.def.id
@@ -445,6 +555,23 @@ func _render_inspector() -> void:
 	edit.text = "Place details"
 	edit.pressed.connect(func() -> void: open_requested.emit(place))
 	inspector.add_child(edit)
+	_place_setting(place, "zone", "zone", "AREA: WHAT IS FOUND AND MET WHILE EXPLORING HERE", "No area: nothing to explore")
+	_place_setting(place, "region", "region", "REGION: ITS PART OF THE MAP AND TRAVEL LIST", "The region of the nearest place that has one")
+	var doors: Dictionary = {}
+	for exit: Dictionary in exits_by_place.get(inspected_id, []):
+		var named := RegEx.create_from_string("\\bdoor ([a-z0-9_]+)").search(str(exit.text))
+		if named != null: doors[named.get_string(1)] = str(exit.direction)
+	if not doors.is_empty(): _inspector_label("DOORS", inspector, 13)
+	for id: String in doors:
+		for row: Dictionary in workspace.rows:
+			if row.def.type != "door" or row.def.id != id or row.def.mode == "extend": continue
+			var open_door := Button.new()
+			var state := _field(row, "locked")
+			open_door.text = "🚪 %s, %s  ·  %s" % [_title(row), str(doors[id]), "locked" if state == "yes" else ("open" if state in ["", "no"] else "locked when a condition holds")]
+			open_door.tooltip_text = "Open the door's details: its name, lock and what the player reads."
+			open_door.clip_text = true
+			open_door.pressed.connect(func() -> void: open_requested.emit(row))
+			inspector.add_child(open_door)
 	_inspector_label("EVENTS", inspector, 13)
 	if events.is_empty():
 		_inspector_label("No automatic events are associated with this place or its zone.", inspector)
