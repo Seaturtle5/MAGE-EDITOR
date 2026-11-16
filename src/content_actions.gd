@@ -191,6 +191,57 @@ func _refresh_replace() -> void:
 		item.set_text(0, "%s:   %s   →   %s" % [entry.where, entry.before, entry.after])
 		item.set_metadata(0, entry)
 
+## Which packs need which: what each loaded pack requires, and what your
+## pack uses of the others.
+func show_dependencies() -> void:
+	var dialog := AcceptDialog.new()
+	dialog.title = "How the packs depend on each other"
+	dialog.ok_button_text = "Close"
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	dialog.add_child(scroll)
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(body)
+	var mine := workspace.manifest(workspace.target)
+	var loaded: Dictionary = {}
+	for folder: String in workspace.pack_paths:
+		var info := workspace.manifest(folder)
+		if not info.is_empty(): loaded[info.id] = info
+	# What your pack uses of each other pack, counted from the places IDs are meant.
+	var owners: Dictionary = {}
+	for row: Dictionary in workspace.rows:
+		if not row.doc.writable and row.def.mode != "extend" and row.def.type != "pack" and not owners.has(row.def.id): owners[row.def.id] = row.pack
+	var used: Dictionary = {}
+	var index := workspace.uses_index()
+	for id: String in index:
+		if owners.has(id): used[owners[id]] = int(used.get(owners[id], 0)) + index[id].size()
+	body.add_child(AuthoringLayout.label("Your pack: " + workspace.title_of("pack", str(mine.get("id", ""))), 18))
+	var needs: Array = mine.get("requires", [])
+	if needs.is_empty() and used.is_empty(): body.add_child(AuthoringLayout.label("It stands on its own: it needs no other pack.", 14, true))
+	for id: String in needs:
+		var note := "used in %d place%s" % [int(used.get(id, 0)), "" if int(used.get(id, 0)) == 1 else "s"] if used.has(id) else "not used yet by anything in your pack"
+		var line := AuthoringLayout.label("needs  📦 %s   ·   %s%s" % [id, note, "" if loaded.has(id) else "   ·   ⚠ not loaded here"], 14)
+		if not loaded.has(id): line.theme_type_variation = "ErrorLabel"
+		body.add_child(line)
+	for id: String in used:
+		if id in needs: continue
+		var missing := AuthoringLayout.label("⚠ uses  📦 %s in %d place%s without naming it as needed. Using its content from a picker adds it." % [id, int(used[id]), "" if int(used[id]) == 1 else "s"], 14)
+		missing.theme_type_variation = "ErrorLabel"
+		body.add_child(missing)
+	body.add_child(AuthoringLayout.label("The other packs", 18))
+	var ids: Array = loaded.keys()
+	ids.sort()
+	for id: String in ids:
+		if id == mine.get("id", ""): continue
+		var requires: Array = loaded[id].requires
+		var needed_by: Array = ids.filter(func(other: String) -> bool: return id in loaded[other].requires)
+		body.add_child(AuthoringLayout.label("📦 %s   ·   needs: %s   ·   needed by: %s" % [id, ", ".join(requires) if not requires.is_empty() else "nothing", ", ".join(needed_by) if not needed_by.is_empty() else "nothing"], 13, true))
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	AuthoringLayout.popup(dialog, Vector2i(720, 520))
+
 static func use_label(use: Dictionary) -> String:
 	return "%s  %s   ·   %s" % [Wording.icon(use.row.def.type), Wording.title(use.row), str(use.text).trim_prefix("~ ")]
 

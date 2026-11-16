@@ -110,6 +110,10 @@ var forward_button: Button
 var value_uses: ItemList
 var playtest := Playtest.new()
 var play_menu: MenuButton
+var find_button: Button
+var help_button: Button
+var compact := false
+var create_button: Button
 const SCALES := [90, 100, 110, 125, 150]
 const GROUP_ICONS := {"Events": "⚡", "Stories": "💬", "Items": "🎒", "Characters": "👤", "Creatures": "⚔", "Places": "📍", "Quests": "🏁", "Rules": "🔢", "Other": "…", "Pack": "📦", "Files": "🗎"}
 
@@ -198,15 +202,28 @@ func _build_ui() -> void:
 	var subtitle := _label(":EDITOR", 19)
 	subtitle.theme_type_variation = "AccentLabel"
 	bar.add_child(subtitle)
-	resized.connect(func() -> void:
-		logo.visible = size.x >= 1180
-		subtitle.visible = logo.visible)
+	var fit := func() -> void:
+		# A narrow window keeps every button, with fewer words.
+		logo.visible = size.x >= 1240
+		subtitle.visible = logo.visible
+		compact = size.x < 1100
+		find_button.text = "🔍" if compact else "🔍 Find anything"
+		create_button.text = "+" if compact else "+ Create"
+		play_menu.text = "▶" if compact else "▶ Play"
+		if back_button != null:
+			back_button.visible = not compact
+			forward_button.visible = not compact
+			help_button.text = "?" if compact else "? Help"
+		_refresh_diagnostics()
+		_history_changed()
+	resized.connect(fit)
+	fit.call_deferred()
 	var file_menu := MenuButton.new()
 	file_menu.text = "Pack ▾"
 	file_menu.flat = false
 	file_menu.tooltip_text = "Create or open a pack, add other packs to use their content, import pictures."
 	var popup := file_menu.get_popup()
-	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["History of changes…", 7], ["Find and replace in story text…      Ctrl+H", 8], ["", -1], ["Delete the selected content…", 4]]:
+	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["History of changes…", 7], ["Find and replace in story text…      Ctrl+H", 8], ["How the packs depend on each other…", 9], ["", -1], ["Delete the selected content…", 4]]:
 		if entry[1] < 0: popup.add_separator()
 		else: popup.add_item(entry[0], entry[1])
 	popup.id_pressed.connect(_on_pack_menu)
@@ -220,11 +237,11 @@ func _build_ui() -> void:
 	bar.add_child(undo_button)
 	redo_button = _button("⟳", _redo, "Redo (Ctrl+Shift+Z).")
 	bar.add_child(redo_button)
-	var find := _button("🔍 Find anything", _find_anything, "Jump to any content, story text or value, or run a command (Ctrl+K).")
-	bar.add_child(find)
-	var create := _button("+ Create", _show_new, "Create a story, character, item or other content.")
-	create.theme_type_variation = "PrimaryButton"
-	bar.add_child(create)
+	find_button = _button("🔍 Find anything", _find_anything, "Find anything: jump to any content, story text or value, or run a command (Ctrl+K).")
+	bar.add_child(find_button)
+	create_button = _button("+ Create", _show_new, "Create a story, character, item or other content.")
+	create_button.theme_type_variation = "PrimaryButton"
+	bar.add_child(create_button)
 	play_menu = MenuButton.new()
 	play_menu.text = "▶ Play"
 	play_menu.flat = false
@@ -342,9 +359,9 @@ func _build_ui() -> void:
 		button.theme_type_variation = "StepButton"
 		navigation.add_child(button)
 		nav_buttons[place[1]] = button
-	var help := _button("? Help", _show_tour, "A short tour of the editor.")
-	help.theme_type_variation = "Ghost"
-	navigation.add_child(help)
+	help_button = _button("? Help", _show_tour, "A short tour of the editor.")
+	help_button.theme_type_variation = "Ghost"
+	navigation.add_child(help_button)
 	var context := HBoxContainer.new()
 	center.add_child(context)
 	heading = _label("Choose something to edit", 20)
@@ -506,6 +523,7 @@ func _on_pack_menu(id: int) -> void:
 		6: _save_all()
 		7: _show_history()
 		8: actions.find_and_replace()
+		9: actions.show_dependencies()
 
 func _set_side_panel(open: bool) -> void:
 	side_panel.visible = open
@@ -1338,6 +1356,7 @@ func _validate() -> void:
 	_set_status("Checked the pack with the game engine, unsaved changes included: " + ("no problems." if workspace.diagnostics.is_empty() else "%d problem%s, %d note%s." % [errors, "" if errors == 1 else "s", workspace.diagnostics.size() - errors, "" if workspace.diagnostics.size() - errors == 1 else "s"]))
 
 func _refresh_diagnostics() -> void:
+	if diagnostics_list == null: return
 	diagnostics_list.clear()
 	var errors := 0
 	for item: Dictionary in workspace.diagnostics:
@@ -1346,7 +1365,8 @@ func _refresh_diagnostics() -> void:
 		diagnostics_list.set_item_metadata(diagnostics_list.item_count - 1, item)
 	if check_state != null:
 		var fresh: bool = workspace.validation_revision == workspace.revision
-		check_state.text = ("⚠ %d problem%s" % [errors, "" if errors == 1 else "s"]) if errors > 0 else ("✓ No problems" if fresh else "✓ Check")
+		check_state.text = ("⚠ %d" % errors if compact else "⚠ %d problem%s" % [errors, "" if errors == 1 else "s"]) if errors > 0 else ("✓" if compact else "✓ No problems" if fresh else "✓ Check")
+		check_state.tooltip_text = ("%d problem%s found. Choose to check again and list them." % [errors, "" if errors == 1 else "s"]) if errors > 0 else ("No problems found by the game engine." if fresh else "Check the pack with the game engine and list any problems.")
 		check_state.add_theme_color_override("font_color", EditorTheme.color("bad") if errors > 0 else EditorTheme.color("good") if fresh else EditorTheme.color("text"))
 
 ## Opens the place a problem is in: the block of a story, or the content's details.
@@ -2061,7 +2081,7 @@ func _history_changed() -> void:
 	redo_button.tooltip_text = "Redo " + (str(workspace.history.steps[workspace.history.cursor].label) if workspace.history.cursor < workspace.history.steps.size() else "(nothing to redo)")
 	if save_state != null:
 		var unsaved := workspace.dirty_count()
-		save_state.text = "💾 Saved" if unsaved == 0 else "● Save %d" % unsaved
+		save_state.text = ("💾" if compact else "💾 Saved") if unsaved == 0 else ("● %d" % unsaved if compact else "● Save %d" % unsaved)
 		save_state.tooltip_text = "Everything is saved." if unsaved == 0 else "%d file%s changed. Choose to write them to the pack (Ctrl+S)." % [unsaved, "" if unsaved == 1 else "s"]
 		save_state.theme_type_variation = "" if unsaved == 0 else "PrimaryButton"
 	if toast_undo != null and workspace.history.cursor == 0: toast_undo.hide()

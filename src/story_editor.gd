@@ -43,7 +43,7 @@ var drawn_revision := -1
 static var clipboard := ""
 
 func _ready() -> void:
-	custom_minimum_size.x = 380
+	custom_minimum_size.x = 340
 	var top := HBoxContainer.new()
 	add_child(top)
 	heading = AuthoringLayout.label("Choose a story", 18)

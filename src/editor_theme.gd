@@ -50,15 +50,30 @@ static func symbol_fonts() -> Array[Font]:
 			_symbols.append(system)
 	return _symbols
 
+static var _fonts: Dictionary = {}
+
+## An interface font with the symbol fonts behind it. Symbol fonts are often
+## taller than the text font, and a line is as tall as its tallest font: the
+## extra is taken off again, so text keeps the spacing of its own font.
 static func font(file: String) -> Font:
+	if _fonts.has(file): return _fonts[file]
 	var path := "res://fonts/" + file
-	var result: Font
-	if ResourceLoader.exists(path): result = load(path) as Font
+	var base: Font
+	if ResourceLoader.exists(path): base = load(path) as Font
 	else:
-		var fallback := SystemFont.new()
-		fallback.font_names = PackedStringArray(["Barlow", "Noto Sans", "DejaVu Sans"])
-		result = fallback
-	if result.fallbacks.is_empty(): result.fallbacks = symbol_fonts()
+		var named := SystemFont.new()
+		named.font_names = PackedStringArray(["Barlow", "Noto Sans", "DejaVu Sans"])
+		base = named
+	# Measured at the smallest size in use, so small text is never squeezed;
+	# headings come out a little airier.
+	var ascent := base.get_ascent(13)
+	var descent := base.get_descent(13)
+	if base.fallbacks.is_empty(): base.fallbacks = symbol_fonts()
+	var result := FontVariation.new()
+	result.base_font = base
+	result.set_spacing(TextServer.SPACING_TOP, -int(round(base.get_ascent(13) - ascent)))
+	result.set_spacing(TextServer.SPACING_BOTTOM, -int(round(base.get_descent(13) - descent)))
+	_fonts[file] = result
 	return result
 
 static func build() -> Theme:
