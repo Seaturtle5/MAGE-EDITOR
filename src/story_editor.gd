@@ -38,6 +38,7 @@ var writer: VBoxContainer
 var writer_text: TextEdit
 var writer_done: Callable
 var focus_line := -1
+var drawn_revision := -1
 ## Blocks copied last, for displays without a system clipboard.
 static var clipboard := ""
 
@@ -98,14 +99,19 @@ func _ready() -> void:
 	check_timer.one_shot = true
 	check_timer.wait_time = 0.3
 	check_timer.timeout.connect(func() -> void:
-		workspace.validate_buffers()
+		# With very many packs loaded the full check waits for the Check button.
+		if workspace.heavy(): workspace.check_working()
+		else: workspace.validate_buffers()
 		checked_revision = workspace.revision
 		refresh()
 		validated.emit())
 	add_child(check_timer)
 
 func show_story(value: PackWorkspace, selected: Dictionary) -> void:
-	if row.is_empty() or selected.is_empty() or row.doc.path != selected.doc.path or row.def.id != selected.def.id or row.get("script_field", "") != selected.get("script_field", ""):
+	var same: bool = not (row.is_empty() or selected.is_empty() or row.doc.path != selected.doc.path or row.def.id != selected.def.id or row.get("script_field", "") != selected.get("script_field", ""))
+	# Already drawn for this very state of the pack: nothing to do.
+	if same and workspace == value and drawn_revision == value.revision and writer == null: return
+	if not same:
 		folded.clear()
 		selection.clear()
 	workspace = value
@@ -120,6 +126,7 @@ static func story_name(story: Dictionary) -> String:
 
 func refresh() -> void:
 	if blocks == null or workspace == null: return
+	drawn_revision = workspace.revision
 	writer = null
 	AuthoringLayout.clear(blocks)
 	panels.clear()
@@ -174,7 +181,7 @@ func _block(entry: Dictionary, host: VBoxContainer, in_fight: bool) -> void:
 			host.add_child(AuthoringLayout.label("The player chooses:", 13, true))
 			for response: Dictionary in StoryBlocks.children(entries, entry.key): _container(response, host, in_fight)
 			if row.doc.writable:
-				var add := _ghost("＋ Response", "Add another response the player can choose.", "AddRow")
+				var add := _ghost("+ Response", "Add another response the player can choose.", "AddRow")
 				add.pressed.connect(func() -> void: _insert({"line": entry.end_line, "indent": entry.indent}, "* New response", "Add a response"))
 				host.add_child(add)
 		"if":
@@ -361,6 +368,7 @@ func _story_picker(with_endings: bool) -> PickerButton:
 	picker.workspace = workspace
 	picker.drop_kinds = ["scene", "menu"]
 	picker.allow_typing = true
+	picker.label_for = func(id: String) -> String: return {"back": "the conversation (return to the list of responses)", "end": "nothing: end here"}.get(id, BlockCatalog.content_label("scene", id, workspace))
 	picker.options = func() -> Array:
 		var result: Array = []
 		if with_endings:
@@ -470,13 +478,13 @@ func _add_row(host: VBoxContainer, parent: Dictionary, in_fight: bool) -> void:
 	bar.dropped.connect(func(data: Dictionary) -> void: _dropped(data, StoryBlocks.end_spot(row, entries, parent)))
 	host.add_child(bar)
 	var spot := func() -> Dictionary: return StoryBlocks.end_spot(row, entries, parent)
-	var text := _ghost("＋ Text", "Add speech or narration here (Ctrl+Enter).", "AddRow")
+	var text := _ghost("+ Text", "Add speech or narration here (Ctrl+Enter).", "AddRow")
 	text.pressed.connect(func() -> void: _write({}, spot.call(), bar))
 	bar.add_child(text)
-	var action := _ghost("＋ Action", "Add something that happens: give an item, change a counter, move the player…", "AddRow")
+	var action := _ghost("+ Action", "Add something that happens: give an item, change a counter, move the player…", "AddRow")
 	action.pressed.connect(func() -> void: _choose_action(spot.call(), in_fight))
 	bar.add_child(action)
-	var more := _ghost("＋ More ▾", "Conditions, responses, links to other stories, pictures, pauses and fights.", "AddRow")
+	var more := _ghost("+ More ▾", "Conditions, responses, links to other stories, pictures, pauses and fights.", "AddRow")
 	more.pressed.connect(func() -> void: _open_add_menu(more, spot.call(), in_fight))
 	bar.add_child(more)
 	bar.set_meta("spot", spot)
@@ -685,15 +693,15 @@ func _open_menu(entry: Dictionary, anchor: Control) -> void:
 		"branch":
 			if not str(node.get("condition", "")).is_empty(): add.call("✎  Change the condition…", func() -> void: _edit_condition(entry), writable)
 			if whole:
-				add.call("＋  Add “Otherwise, if…”", func() -> void:
+				add.call("+  Add “Otherwise, if…”", func() -> void:
 					_ask_condition("", "Otherwise, if…", func(condition: String) -> void:
 						_perform("Add “Otherwise, if”", func() -> String: return StoryBlocks.add_branch(row, entries, unit, condition, snapshot))), writable)
-				add.call("＋  Add “Otherwise”", func() -> void: _perform("Add “Otherwise”", func() -> String: return StoryBlocks.add_branch(row, entries, unit, "", snapshot)), writable and unit.node["else"] == null)
+				add.call("+  Add “Otherwise”", func() -> void: _perform("Add “Otherwise”", func() -> String: return StoryBlocks.add_branch(row, entries, unit, "", snapshot)), writable and unit.node["else"] == null)
 				add.call("Remove the condition, keep what is inside", func() -> void: _perform("Remove a condition", func() -> String: return StoryBlocks.unwrap(row, entries, unit, snapshot)), writable and StoryBlocks.children(entries, unit.key).size() == 1)
 			else: add.call("Remove this part", func() -> void: _perform("Remove part of a condition", func() -> String: return StoryBlocks.remove_branch(row, entries, entry, snapshot)), writable)
 		"fight":
 			for outcome: String in OUTCOMES:
-				if not node.outcomes.has(outcome): add.call("＋  Add “" + str(OUTCOMES[outcome]) + "”", func() -> void: _perform("Add a fight result", func() -> String: return StoryBlocks.add_outcome(row, entries, entry, outcome, snapshot)), writable)
+				if not node.outcomes.has(outcome): add.call("+  Add “" + str(OUTCOMES[outcome]) + "”", func() -> void: _perform("Add a fight result", func() -> String: return StoryBlocks.add_outcome(row, entries, entry, outcome, snapshot)), writable)
 	if whole and node.kind != "outcome":
 		menu.add_separator()
 		add.call("Add above…", func() -> void: _open_add_menu(anchor, StoryBlocks.before_spot(unit), in_fight), movable)

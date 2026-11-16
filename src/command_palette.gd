@@ -29,7 +29,8 @@ func _ready() -> void:
 func open(workspace: PackWorkspace) -> void:
 	entries.clear()
 	for row: Dictionary in workspace.rows:
-		entries.append({"label": Wording.icon(row.def.type) + " " + Wording.title(row) + " · " + Wording.name(row.def.type) + " · " + row.pack, "search": row.doc.block(row.def).to_lower(), "row": row})
+		# Your own content is found by its text too; other packs by name and kind.
+		entries.append({"label": Wording.icon(row.def.type) + " " + Wording.title(row) + " · " + Wording.name(row.def.type) + " · " + row.pack, "search": str(row.doc.block(row.def)).to_lower() if row.doc.writable else str(row.def.id), "row": row})
 	for key: String in workspace.preview_content().values:
 		entries.append({"label": "# " + key, "search": key.to_lower(), "value": key})
 	for command: String in ["Home", "New content", "Check pack", "Save all", "Undo", "Redo", "Tour"]:

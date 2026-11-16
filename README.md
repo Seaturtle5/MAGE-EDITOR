@@ -39,7 +39,7 @@ Each block is a sentence. The highlighted parts are chips: choose one to change 
 
 | To | Do |
 |---|---|
-| Add | **＋ Text**, **＋ Action** or **＋ More** at the place you want it. Action opens "What should happen?": search with everyday words (heal, trust, teleport), fill in the sentence, **Add** or **Add & next**. You can also type a line you know. |
+| Add | **+ Text**, **+ Action** or **+ More** at the place you want it. Action opens "What should happen?": search with everyday words (heal, trust, teleport), fill in the sentence, **Add** or **Add & next**. You can also type a line you know. |
 | Write | Double-click a text block. **Insert** adds a name, he or she, or a counter's number; **Vary** and **Only if…** wrap the selected words. Ctrl+Enter keeps the text, Esc cancels. |
 | Make it conditional | **⋯ → Only if…** puts the block (or all selected blocks) inside a condition. Conditions are built from sentences in groups: all of, any of, none of. Add **Otherwise, if…** and **Otherwise** from the condition's own menu. |
 | Move | Drag the handle; hold Ctrl to copy. Or use **⋯ → Move up / Move down**, Alt+↑ / Alt+↓, or cut and paste. Shift-click and Ctrl-click select several blocks. |

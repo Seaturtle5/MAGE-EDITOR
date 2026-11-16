@@ -89,7 +89,19 @@ func show_story(value: PackWorkspace, selected: Dictionary) -> void:
 		sample_form = config.get_value(key, "form", "")
 		sample_level = int(config.get_value(key, "level", 1))
 		sample.select(clampi(int(config.get_value(key, "sex", 0)), 0, 3))
-	if timer != null: timer.start()
+	if timer == null: return
+	# With very many packs loaded, preparing the preview takes a moment: it waits to be asked.
+	if workspace.heavy() and not row.is_empty():
+		for child: Node in output.get_children():
+			output.remove_child(child)
+			child.queue_free()
+		var update := Button.new()
+		update.text = "↻ Update the preview"
+		update.tooltip_text = "Many packs are loaded, so the preview is updated when you ask."
+		update.pressed.connect(refresh)
+		output.add_child(update)
+		return
+	timer.start()
 
 static func sample_game(db: ContentDB, preset: Dictionary, seed_number: int = 1) -> Game:
 	var game := Game.new(db, seed_number)

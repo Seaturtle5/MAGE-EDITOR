@@ -102,7 +102,7 @@ func _question(page: VBoxContainer, question: Dictionary) -> void:
 				if row.def.type == kind and row.def.mode != "extend": result.append({"value": row.def.id, "label": Wording.title(row), "detail": "" if row.doc.writable else str(row.pack)})
 			return result
 		if AuthorTemplates.INLINE.has(kind):
-			picker.commands = [{"label": "＋ New " + Wording.name(kind) + "…", "action": func() -> void: _name_new(picker, kind)}]
+			picker.commands = [{"label": "+ New " + Wording.name(kind) + "…", "action": func() -> void: _name_new(picker, kind)}]
 		picker.picked.connect(func(_value: String) -> void: _changed())
 		getters[key] = func() -> String: return picker.value
 		setters[key] = func(value: String) -> void: picker.set_value(value)
@@ -218,7 +218,7 @@ func _responses(key: String, initial: String) -> Control:
 		rows.add_child(card)
 	for response: Dictionary in AuthorTemplates.read_responses(initial): add_row.call(response)
 	var add := Button.new()
-	add.text = "＋ Response"
+	add.text = "+ Response"
 	add.theme_type_variation = "AddRow"
 	add.pressed.connect(func() -> void:
 		add_row.call({})
@@ -270,7 +270,7 @@ func _stages(key: String, initial: String) -> Control:
 		rows.add_child(row)
 	for stage: String in initial.split(";", false): add_row.call(stage)
 	var add := Button.new()
-	add.text = "＋ Stage"
+	add.text = "+ Stage"
 	add.theme_type_variation = "AddRow"
 	add.pressed.connect(func() -> void:
 		add_row.call("")

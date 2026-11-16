@@ -40,7 +40,7 @@ func _ready() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toolbar.add_child(title)
 	var add_place := Button.new()
-	add_place.text = "＋ Place"
+	add_place.text = "+ Place"
 	add_place.tooltip_text = "Add a new place to the map."
 	add_place.pressed.connect(func() -> void: place_requested.emit())
 	toolbar.add_child(add_place)
@@ -484,7 +484,7 @@ func _place_setting(place: Dictionary, key: String, type: String, caption: Strin
 		for row: Dictionary in workspace.rows:
 			if row.def.type == type and row.def.mode != "extend": result.append({"value": row.def.id, "label": Wording.title(row), "detail": "" if row.doc.writable else str(row.pack)})
 		return result
-	picker.commands = [{"label": "＋ New " + Wording.name(type) + "…", "action": func() -> void:
+	picker.commands = [{"label": "+ New " + Wording.name(type) + "…", "action": func() -> void:
 		var dialog := ConfirmationDialog.new()
 		dialog.title = "New " + Wording.name(type)
 		dialog.ok_button_text = "Create"

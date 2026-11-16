@@ -37,13 +37,29 @@ static func box(fill: String, border: String = "", padding: int = 8, radius: int
 		style.set_border_width_all(1)
 	return style
 
+static var _symbols: Array[Font] = []
+
+## Fonts for the symbols and icons the interface fonts lack. Naming them here
+## spares a search through the system's fonts for every label that shows one.
+static func symbol_fonts() -> Array[Font]:
+	if _symbols.is_empty():
+		for names: Array in [["DejaVu Sans", "Segoe UI Symbol", "Apple Symbols", "Arial Unicode MS"], ["Noto Sans Symbols2", "Noto Sans Symbols", "Symbola", "Segoe UI Symbol"], ["Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji", "Noto Emoji"]]:
+			var system := SystemFont.new()
+			system.font_names = PackedStringArray(names)
+			system.allow_system_fallback = false
+			_symbols.append(system)
+	return _symbols
+
 static func font(file: String) -> Font:
 	var path := "res://fonts/" + file
-	if ResourceLoader.exists(path):
-		return load(path) as Font
-	var fallback := SystemFont.new()
-	fallback.font_names = PackedStringArray(["Barlow", "Noto Sans", "DejaVu Sans"])
-	return fallback
+	var result: Font
+	if ResourceLoader.exists(path): result = load(path) as Font
+	else:
+		var fallback := SystemFont.new()
+		fallback.font_names = PackedStringArray(["Barlow", "Noto Sans", "DejaVu Sans"])
+		result = fallback
+	if result.fallbacks.is_empty(): result.fallbacks = symbol_fonts()
+	return result
 
 static func build() -> Theme:
 	var theme := Theme.new()
@@ -190,6 +206,7 @@ static func build() -> Theme:
 	theme.set_color("font_color", "CodeLabel", color("muted"))
 	var mono := SystemFont.new()
 	mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "monospace"])
+	mono.fallbacks = symbol_fonts()
 	theme.set_font("font", "CodeLabel", mono)
 	theme.set_font_size("font_size", "CodeLabel", 12)
 	theme.set_type_variation("GoodLabel", "Label")

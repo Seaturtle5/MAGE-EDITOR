@@ -37,11 +37,28 @@ func preview_content() -> ContentDB:
 			found[info.id] = info
 	var paths: Array = documents.keys()
 	paths.sort()
+	var by_pack: Dictionary = {}
+	for path: String in paths:
+		var folder := owner(path)
+		if not by_pack.has(folder): by_pack[folder] = []
+		by_pack[folder].append(path)
+	# The loader folds an extension into the definition it extends, in place,
+	# and lets later extensions add to the fields of earlier ones. Both kinds
+	# go to it as copies, so the editor's own definitions stay as written.
+	var extended: Dictionary = {}
+	for path: String in paths:
+		for definition: FscParser.Definition in documents[path].definitions():
+			if definition.mode == "extend": extended[definition.type + ":" + definition.id] = true
 	for id: String in preview_db._load_order(found):
-		for path: String in paths:
-			if owner(path) != found[id].path:
-				continue
-			var result := FscParser.parse(documents[path].text, path)
+		for path: String in by_pack.get(found[id].path, []):
+			var result: FscParser.Result = documents[path].parsed()
+			if result.definitions.any(func(definition: FscParser.Definition) -> bool: return definition.mode == "extend" or extended.has(definition.type + ":" + definition.id)):
+				var copy := FscParser.Result.new()
+				copy.path = result.path
+				copy.diagnostics = result.diagnostics.duplicate(true)
+				for definition: FscParser.Definition in result.definitions:
+					copy.definitions.append(_clone(definition) if definition.mode == "extend" or extended.has(definition.type + ":" + definition.id) else definition)
+				result = copy
 			preview_db._parse_results.append(result)
 			for definition: FscParser.Definition in result.definitions:
 				if definition.type == "pack":
@@ -51,6 +68,29 @@ func preview_content() -> ContentDB:
 	preview_revision = revision
 	return preview_db
 
+
+## A copy of a parsed definition whose fields and lists can be added to
+## without touching the original. Lines are shared: nothing rewrites them.
+static func _clone(definition: FscParser.Definition) -> FscParser.Definition:
+	var copy := FscParser.Definition.new()
+	copy.type = definition.type
+	copy.id = definition.id
+	copy.mode = definition.mode
+	copy.path = definition.path
+	copy.line = definition.line
+	copy.field_order = definition.field_order.duplicate()
+	copy.options = definition.options.duplicate(true)
+	copy.nodes = definition.nodes.duplicate(true)
+	copy.body = definition.body.duplicate()
+	for name: String in definition.fields:
+		var field: FscParser.Field = definition.fields[name]
+		var twin := FscParser.Field.new()
+		twin.name = field.name
+		twin.value = field.value
+		twin.line = field.line
+		twin.children = field.children.duplicate()
+		copy.fields[name] = twin
+	return copy
 
 static func types() -> Array:
 	var out: Array = ContentDB.SCHEMA.keys() + ContentDB.PENDING_TYPES
@@ -93,9 +133,33 @@ func add_reference(folder: String) -> String:
 	pack_paths.append(folder)
 	_scan(folder, false)
 	reindex()
-	validate()
+	if heavy(): check_working()
+	else: validate()
 	return ""
 
+
+## Adds several packs to use their content, with one check at the end.
+## Returns the folders that could not be added, with the reason.
+func add_references(folders: Array) -> Dictionary:
+	var refused: Dictionary = {}
+	if target.is_empty(): return {"": "Open a working pack first."}
+	var ids: Dictionary = {}
+	for path: String in pack_paths: ids[manifest(path).get("id", "")] = true
+	for raw: String in folders:
+		var folder := raw.simplify_path().trim_suffix("/")
+		var info := manifest(folder)
+		if folder in pack_paths: continue
+		if info.is_empty(): refused[folder] = "It has no valid pack.fsc."
+		elif ids.has(info.id): refused[folder] = "A pack with the ID %s is already loaded." % info.id
+		elif pack_paths.any(func(path: String) -> bool: return folder.begins_with(path + "/") or path.begins_with(folder + "/")): refused[folder] = "It must be separate from the packs already loaded."
+		else:
+			ids[info.id] = true
+			pack_paths.append(folder)
+			_scan(folder, false)
+	reindex()
+	if heavy(): check_working()
+	else: validate()
+	return refused
 
 func manifest(folder: String) -> Dictionary:
 	var path := folder.path_join("pack.fsc")
@@ -106,9 +170,11 @@ func manifest(folder: String) -> Dictionary:
 		return {}
 	var contents: String = documents[path].text if documents.has(path) else FileAccess.get_file_as_string(path)
 	var parsed := FscParser.parse(contents, path)
-	if parsed.definitions.size() != 1 or parsed.definitions[0].type != "pack":
+	# Like the game: the file names one pack; it may hold other definitions too.
+	var named := parsed.definitions.filter(func(candidate: FscParser.Definition) -> bool: return candidate.type == "pack")
+	if named.size() != 1:
 		return {}
-	var definition := parsed.definitions[0]
+	var definition: FscParser.Definition = named[0]
 	var requires: Array = []
 	if definition.fields.has("requires"):
 		for part in definition.fields["requires"].value.split(","):
@@ -134,26 +200,85 @@ func _scan(folder: String, writable: bool) -> void:
 			_scan(folder.path_join(name), writable)
 
 
+## More content than this is checked in full only when asked, and its
+## preview is refreshed on request: a full check of every pack takes seconds.
+const HEAVY := 4000
+var _reference_cache: Array = []
+var _reference_cache_key := ""
+
+func heavy() -> bool:
+	return rows.size() > HEAVY
+
+static func _row_order(a: Array, b: Array) -> bool:
+	return str(a[0]).naturalnocasecmp_to(str(b[0])) < 0
+
+## [sort key, definition, document, pack id, pack folder, ordinal] for each definition of a file.
+func _entries_of(path: String, pack_ids: Dictionary) -> Array:
+	var doc: PackDocument = documents[path]
+	var counts: Dictionary = {}
+	var pack := owner(path)
+	var pack_id: String = pack_ids.get(pack, pack.get_file())
+	var out: Array = []
+	for definition in doc.definitions():
+		var identity := definition.type + "|" + definition.id + "|" + definition.mode
+		var ordinal: int = counts.get(identity, 0)
+		counts[identity] = ordinal + 1
+		out.append([definition.type + ":" + definition.id + ":" + pack_id, definition, doc, pack_id, pack, ordinal])
+	return out
+
 func reindex() -> void:
-	rows.clear()
+	var pack_ids: Dictionary = {}
+	for folder: String in pack_paths: pack_ids[folder] = manifest(folder).get("id", folder.get_file())
+	# The other packs never change: their part of the list is worked out once.
+	var key := "|".join(pack_paths) + "|" + str(documents.size())
+	if key != _reference_cache_key:
+		_reference_cache.clear()
+		for path: String in documents:
+			if not documents[path].writable: _reference_cache.append_array(_entries_of(path, pack_ids))
+		_reference_cache.sort_custom(_row_order)
+		_reference_cache_key = key
+	var own: Array = []
 	for path: String in documents:
-		var doc: PackDocument = documents[path]
-		var counts: Dictionary = {}
-		for definition in doc.definitions():
-			var pack := owner(path)
-			var identity := definition.type + "|" + definition.id + "|" + definition.mode
-			var ordinal: int = counts.get(identity, 0)
-			counts[identity] = ordinal + 1
-			rows.append({"def": definition, "doc": doc, "pack": manifest(pack).get("id", pack.get_file()), "root": pack, "ordinal": ordinal})
-	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return (a.def.type + ":" + a.def.id + ":" + a.pack).naturalnocasecmp_to(b.def.type + ":" + b.def.id + ":" + b.pack) < 0)
+		if documents[path].writable: own.append_array(_entries_of(path, pack_ids))
+	own.sort_custom(_row_order)
+	rows.clear()
+	var at := 0
+	for entry: Array in _reference_cache:
+		while at < own.size() and _row_order(own[at], entry):
+			rows.append({"def": own[at][1], "doc": own[at][2], "pack": own[at][3], "root": own[at][4], "ordinal": own[at][5]})
+			at += 1
+		rows.append({"def": entry[1], "doc": entry[2], "pack": entry[3], "root": entry[4], "ordinal": entry[5]})
+	while at < own.size():
+		rows.append({"def": own[at][1], "doc": own[at][2], "pack": own[at][3], "root": own[at][4], "ordinal": own[at][5]})
+		at += 1
 	revision += 1
 	history.checkpoint(documents)
 
+## A quick check of the working pack alone: what the parser and the story
+## compiler say. Problems last found in other packs are kept as they were.
+func check_working() -> void:
+	var fresh: Array = diagnostics.filter(func(item: Dictionary) -> bool: return not (documents.has(item.path) and documents[item.path].writable))
+	for path: String in documents:
+		var doc: PackDocument = documents[path]
+		if not doc.writable: continue
+		var result := doc.parsed()
+		fresh.append_array(result.diagnostics.duplicate(true))
+		for definition: FscParser.Definition in result.definitions:
+			var scripts: Array = [definition.nodes] if definition.type in ["scene", "text"] else []
+			for field_key: String in definition.fields:
+				if ContentDB.SCHEMA.get(definition.type, {}).get(field_key, "") == "script": scripts.append(StoryGraph.script_nodes({"def": definition, "doc": doc, "script_field": field_key}))
+			for nodes: Array in scripts:
+				for problem: Dictionary in Program.compile(definition.id, nodes, path).errors:
+					fresh.append({"severity": "error", "path": path, "line": problem.line, "message": problem.message})
+	diagnostics = fresh
+
+var _owners: Dictionary = {}
 
 func owner(path: String) -> String:
+	if _owners.has(path) and _owners[path] in pack_paths: return _owners[path]
 	for folder in pack_paths:
 		if path.begins_with(folder + "/"):
+			_owners[path] = folder
 			return folder
 	return ""
 
@@ -193,7 +318,7 @@ func save_all() -> String:
 
 func add_requirement(id: String) -> String:
 	var doc: PackDocument = documents[target.path_join("pack.fsc")]
-	var definition := doc.definitions()[0]
+	var definition: FscParser.Definition = doc.definitions().filter(func(candidate: FscParser.Definition) -> bool: return candidate.type == "pack")[0]
 	var info := manifest(target)
 	var requirements: Array = info.requires
 	if id == info.id or id in requirements:
@@ -261,49 +386,12 @@ static func template(type: String, id: String) -> String:
 			return "name: " + id.capitalize() if schema.has("name") else "// Add fields using the Fields tab."
 
 
+## Checks all loaded packs with the engine's validator, unsaved changes
+## included. Diagnostics carry the files' own paths.
 func validate() -> void:
 	if target.is_empty():
 		return
-	# Validate current buffers, including unsaved work, with the engine's
-	# loader and validator. The snapshot also isolates reference packs.
-	var snapshot := OS.get_user_data_dir().path_join("validation-" + str(OS.get_process_id()) + "-" + str(Time.get_ticks_usec()))
-	DirAccess.make_dir_recursive_absolute(snapshot)
-	var mapping: Dictionary = {}
-	var found: Dictionary = {}
-	for i in pack_paths.size():
-		var folder := pack_paths[i]
-		var info := manifest(folder)
-		if info.is_empty():
-			continue
-		var stage := snapshot.path_join(str(i))
-		_copy_folder(folder, stage)
-		mapping[stage] = folder
-		for path: String in documents:
-			if owner(path) == folder:
-				var destination := stage.path_join(path.trim_prefix(folder + "/"))
-				DirAccess.make_dir_recursive_absolute(destination.get_base_dir())
-				var file := FileAccess.open(destination, FileAccess.WRITE)
-				if file != null:
-					file.store_string(documents[path].text)
-		found[info.id] = {"path": stage, "requires": info.requires, "manifest": stage.path_join("pack.fsc")}
-	db = ContentDB.new()
-	validation_paths = mapping.duplicate()
-	for id: String in db._load_order(found):
-		db.load_pack(found[id].path)
-	db._finish()
-	Validator.run(db)
-	diagnostics = db.diagnostics.duplicate(true)
-	for diagnostic: Dictionary in diagnostics:
-		diagnostic.path = _original_path(diagnostic.path, mapping)
-	for declaration: Dictionary in db.values.values():
-		if declaration.has("path"):
-			declaration.path = _original_path(declaration.path, mapping)
-	# An invalid manifest must remain visible even when it cannot be staged.
-	for folder in pack_paths:
-		if manifest(folder).is_empty():
-			diagnostics.append({"severity": "error", "path": folder.path_join("pack.fsc"), "line": 1, "message": "The manifest must contain exactly one pack definition."})
-	_remove_folder(snapshot)
-	validation_revision = revision
+	validate_buffers()
 
 
 static func _original_path(path: String, mapping: Dictionary) -> String:
@@ -355,11 +443,25 @@ func mentions(row: Dictionary) -> Array[Dictionary]:
 	return result
 
 
+var _link_cache: Array[Dictionary] = []
+var _link_cache_key := ""
+
+## Where stories lead: [{from, target, line}] for every "-> story" and "play story".
+## The other packs' links are found once; yours after every change.
 func story_links() -> Array[Dictionary]:
+	if _link_cache_key != _reference_cache_key:
+		_link_cache = _links_in(false)
+		_link_cache_key = _reference_cache_key
+	var out: Array[Dictionary] = _links_in(true)
+	out.append_array(_link_cache)
+	return out
+
+func _links_in(writable: bool) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var pattern := RegEx.create_from_string("(?:^|:\\s*)(?:->|play)\\s+([a-z0-9_.-]+)")
 	var documents_rows: Dictionary = {}
 	for row in rows:
+		if row.doc.writable != writable: continue
 		if not documents_rows.has(row.doc.path):
 			documents_rows[row.doc.path] = []
 		documents_rows[row.doc.path].append(row)
@@ -367,16 +469,14 @@ func story_links() -> Array[Dictionary]:
 		var entries: Array = documents_rows[path]
 		entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.def.line < b.def.line)
 		var lines: PackedStringArray = documents[path].text.split("\n")
-		for index in entries.size():
-			var row: Dictionary = entries[index]
-			var last_line: int = entries[index + 1].def.line - 1 if index + 1 < entries.size() else lines.size()
-			for i in range(int(row.def.line), last_line):
-				var clean := lines[i].strip_edges()
-				if clean.begins_with("//"):
-					continue
-				var matched := pattern.search(clean)
-				if matched != null and matched.get_string(1) not in ["end", "back"]:
-					out.append({"from": row, "target": matched.get_string(1), "line": i + 1})
+		var index := 0
+		for i in lines.size():
+			var clean := lines[i].strip_edges()
+			if clean.begins_with("//") or ("->" not in clean and "play " not in clean): continue
+			var matched := pattern.search(clean)
+			if matched == null or matched.get_string(1) in ["end", "back"]: continue
+			while index + 1 < entries.size() and int(entries[index + 1].def.line) <= i + 1: index += 1
+			if int(entries[index].def.line) <= i + 1: out.append({"from": entries[index], "target": matched.get_string(1), "line": i + 1})
 	return out
 
 func _inside_working_pack(path: String) -> bool:

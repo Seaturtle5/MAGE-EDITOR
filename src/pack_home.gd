@@ -98,7 +98,7 @@ func refresh(workspace: PackWorkspace) -> void:
 			game.append(template)
 			continue
 		tasks.add_child(_card(Wording.icon(template.kind), template.title, template.about, EditorTheme.category_color(template.kind), func() -> void: task_requested.emit(template)))
-	tasks.add_child(_card("＋", "Something else…", "Any other kind of content, with its own form.", EditorTheme.color("muted"), func() -> void: create_requested.emit()))
+	tasks.add_child(_card("+", "Something else…", "Any other kind of content, with its own form.", EditorTheme.color("muted"), func() -> void: create_requested.emit()))
 	if not game.is_empty():
 		_section("For Flexible Survival", "Shapes this game uses often.")
 		var special := GridContainer.new()

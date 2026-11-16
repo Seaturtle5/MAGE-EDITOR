@@ -31,8 +31,18 @@ func dirty() -> bool:
 	return original != text
 
 
+var _parsed_text := ""
+var _parsed: FscParser.Result
+
+## The file as the engine's parser reads it. Parsed again only after a change.
+func parsed() -> FscParser.Result:
+	if _parsed == null or _parsed_text != text:
+		_parsed = FscParser.parse(text, path)
+		_parsed_text = text
+	return _parsed
+
 func definitions() -> Array[FscParser.Definition]:
-	return FscParser.parse(text, path).definitions
+	return parsed().definitions
 
 
 func offsets() -> Array[int]:

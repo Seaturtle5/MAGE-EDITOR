@@ -338,7 +338,7 @@ func quest_flow(row: Dictionary) -> void:
 			box.add_child(missing)
 		if index == 0: continue
 		var picker := PickerButton.new()
-		picker.placeholder = "＋ Set this stage from a story…"
+		picker.placeholder = "+ Set this stage from a story…"
 		picker.text = picker.placeholder
 		picker.theme_type_variation = "AddRow"
 		picker.options = func() -> Array:

@@ -222,7 +222,7 @@ func _build_ui() -> void:
 	bar.add_child(redo_button)
 	var find := _button("🔍 Find anything", _find_anything, "Jump to any content, story text or value, or run a command (Ctrl+K).")
 	bar.add_child(find)
-	var create := _button("＋ Create", _show_new, "Create a story, character, item or other content.")
+	var create := _button("+ Create", _show_new, "Create a story, character, item or other content.")
 	create.theme_type_variation = "PrimaryButton"
 	bar.add_child(create)
 	play_menu = MenuButton.new()
@@ -510,6 +510,9 @@ func _on_pack_menu(id: int) -> void:
 func _set_side_panel(open: bool) -> void:
 	side_panel.visible = open
 	side_toggle.button_pressed = open
+	if open:
+		_refresh_references()
+		_refresh_values()
 
 func _set_reference_scope(scope: String) -> void:
 	reference_scope = scope
@@ -865,7 +868,7 @@ func _choose_reference() -> void:
 		_show_error("Open a working pack first.")
 		return
 	pending_action = "reference"
-	dialog.title = "Add a read-only reference pack"
+	dialog.title = "Add another pack, or a folder of packs, to use their content"
 	dialog.popup_centered_ratio(0.75)
 
 func _directory_selected(path: String) -> void:
@@ -876,12 +879,24 @@ func _directory_selected(path: String) -> void:
 		pack_dialog.popup_centered()
 		pack_id.grab_focus()
 	elif pending_action == "reference":
+		if not FileAccess.file_exists(path.path_join("pack.fsc")):
+			# A folder of packs: add every pack inside it.
+			var inside: Array = []
+			for name: String in DirAccess.get_directories_at(path):
+				if FileAccess.file_exists(path.path_join(name).path_join("pack.fsc")) and path.path_join(name) != workspace.target: inside.append(path.path_join(name))
+			if inside.is_empty():
+				_show_error("This folder holds no pack. Choose a pack's own folder (the one with pack.fsc), or a folder of packs.")
+				return
+			var refused := workspace.add_references(inside)
+			_refresh_all()
+			_set_status("Added %d pack%s to use their content%s.%s" % [inside.size() - refused.size(), "" if inside.size() - refused.size() == 1 else "s", " (%d could not be added)" % refused.size() if not refused.is_empty() else "", " With this many packs, the full check runs when you choose Check." if workspace.heavy() else ""])
+			return
 		var error := workspace.add_reference(path)
 		if not error.is_empty():
 			_show_error(error)
 			return
 		_refresh_all()
-		_set_status("Reference pack loaded read-only. Add its ID to requires in your pack manifest when you use it.")
+		_set_status("The pack is loaded to use its content. It cannot be changed here; using something from it adds it to the packs yours needs.")
 	elif workspace.dirty_count() > 0:
 		pending_action = "replace_target"
 		pending_path = path
@@ -952,7 +967,7 @@ func _refresh_all() -> void:
 	_refresh_diagnostics()
 	_refresh_selection()
 	_refresh_graph()
-	if home != null: home.refresh(workspace)
+	if home != null and tabs.current_tab == 6: home.refresh(workspace)
 	_history_changed()
 	if world_canvas != null and tabs.current_tab == 5:
 		world_canvas.refresh()
@@ -1236,6 +1251,7 @@ func _source_changed() -> void:
 		selected = {"doc": doc, "def": FscParser.Definition.new(), "pack": "", "root": workspace.owner(doc.path)}
 
 func _refresh_references() -> void:
+	if not side_panel.visible: return
 	references.clear()
 	var query := reference_search.text.to_lower()
 	var count := 0
@@ -1258,12 +1274,13 @@ func _refresh_references() -> void:
 
 func _refresh_values() -> void:
 	values_list.clear()
-	if workspace.db == null:
+	if not side_panel.visible or workspace.target.is_empty():
 		return
-	var keys: Array = workspace.db.values.keys()
+	var declared: Dictionary = workspace.preview_content().values
+	var keys: Array = declared.keys()
 	keys.sort()
 	for key: String in keys:
-		var declaration: Dictionary = workspace.db.values[key]
+		var declaration: Dictionary = declared[key]
 		if not values_search.text.is_empty() and values_search.text.to_lower() not in (key + " " + BlockCatalog.value_label(key, workspace) + " " + str(declaration.get("kind", ""))).to_lower():
 			continue
 		var states: String = ", ".join(declaration.get("states", []))
@@ -1306,6 +1323,10 @@ func _insert_at_writer(text: String) -> void:
 	writing.grab_focus()
 
 func _validate() -> void:
+	if workspace.heavy():
+		_set_status("Checking every loaded pack with the game engine. With this many packs it takes a little while…")
+		await get_tree().process_frame
+		await get_tree().process_frame
 	workspace.validate()
 	_refresh_values()
 	_refresh_diagnostics()

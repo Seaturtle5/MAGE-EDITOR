@@ -216,7 +216,7 @@ func _build_list() -> void:
 			flow.add_child(chip)
 		if content:
 			var add := PickerButton.new()
-			add.placeholder = "＋ Add…"
+			add.placeholder = "+ Add…"
 			add.text = add.placeholder
 			add.theme_type_variation = "AddRow"
 			add.allow_typing = true
@@ -263,6 +263,7 @@ func _value_picker(kind: String) -> PickerButton:
 	button.placeholder = "Choose " + ("a " + VALUE_WORDS[wanted] if not wanted.is_empty() else "a value") + "…"
 	button.text = button.placeholder
 	button.allow_typing = true
+	button.label_for = func(path: String) -> String: return BlockCatalog.value_label(path, workspace)
 	button.options = func() -> Array:
 		var result: Array = []
 		var declared: Dictionary = workspace.preview_content().values
@@ -276,7 +277,7 @@ func _value_picker(kind: String) -> PickerButton:
 				if not declared.has("player." + key): result.append({"value": "player." + key, "label": "the player's " + key.replace("_", " ").replace(".", " "), "detail": "player"})
 		return result
 	if not wanted.is_empty() and wanted != "list":
-		button.commands = [{"label": "＋ New " + str(VALUE_WORDS[wanted]) + "…", "action": func() -> void: _new_value(button, wanted)}]
+		button.commands = [{"label": "+ New " + str(VALUE_WORDS[wanted]) + "…", "action": func() -> void: _new_value(button, wanted)}]
 	button.picked.connect(func(_next: String) -> void: edited.emit())
 	return button
 
@@ -292,11 +293,12 @@ func _build_picker() -> void:
 		picker.placeholder = "Choose " + ("an " if title.left(1) in ["a", "e", "i", "o", "u"] else "a ") + title + "…"
 		picker.text = picker.placeholder
 		picker.options = _options
+		picker.label_for = func(id: String) -> String: return BlockCatalog.label(spec, id, workspace)
 		picker.drop_kinds = _content_types(kind)
 		picker.picked.connect(func(_next: String) -> void: edited.emit())
 		# Results and stages can be made where they are first needed.
-		if kind == "result": picker.commands = [{"label": "＋ New result…", "action": func() -> void: _new_word("result", "What can come of this event? One or two words, such as “taken” or “left behind”.")}]
-		if kind == "stage": picker.commands = [{"label": "＋ New stage…", "action": func() -> void: _new_word("stage", "The next step of the quest, in one or two words.")}]
+		if kind == "result": picker.commands = [{"label": "+ New result…", "action": func() -> void: _new_word("result", "What can come of this event? One or two words, such as “taken” or “left behind”.")}]
+		if kind == "stage": picker.commands = [{"label": "+ New stage…", "action": func() -> void: _new_word("stage", "The next step of the quest, in one or two words.")}]
 	add_child(picker)
 	_read = func() -> String: return picker.value
 	_write = func(next: String) -> void: picker.set_value(next)

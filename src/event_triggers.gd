@@ -47,9 +47,8 @@ static func parse_clause(raw: String) -> Dictionary:
 	return {"type": -1, "raw": raw}
 
 static func title_for(value: PackWorkspace, type: String, id: String) -> String:
-	var content := value.preview_content()
-	if content.has(id, type):
-		return content.typed_value(type, id, "name", id.capitalize())
+	var known := value.title_of(type, id)
+	if not known.is_empty(): return known
 	for candidate: Dictionary in value.rows:
 		if candidate.def.type == type and candidate.def.id == id and candidate.def.mode != "extend":
 			return candidate.doc.field_value(candidate.def, "name") if candidate.def.fields.has("name") else id.capitalize()

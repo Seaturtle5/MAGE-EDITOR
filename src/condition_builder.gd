@@ -113,12 +113,12 @@ func _group_panel(group: Dictionary, parent: Dictionary) -> Control:
 	var tools := HBoxContainer.new()
 	body.add_child(tools)
 	var add := Button.new()
-	add.text = "＋ Condition"
+	add.text = "+ Condition"
 	add.theme_type_variation = "AddRow"
 	add.pressed.connect(add_to.bind(group))
 	tools.add_child(add)
 	var nest := Button.new()
-	nest.text = "＋ Group"
+	nest.text = "+ Group"
 	nest.theme_type_variation = "AddRow"
 	nest.tooltip_text = "Add a group inside this one, for example “any of” inside “all of”."
 	nest.pressed.connect(func() -> void:

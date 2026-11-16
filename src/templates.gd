@@ -16,7 +16,7 @@ const INLINE := {
 	"location": "== location {{id}}\nname: {{name}}\nzone: none\ndescription: Describe this place.",
 	"zone": "== zone {{id}}\nname: {{name}}",
 }
-const NEW := "＋"
+const NEW := "+"
 
 static func available(workspace: PackWorkspace, include_game: bool = false) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
@@ -156,7 +156,10 @@ static func create(template: Dictionary, answers: Dictionary, workspace: PackWor
 	var filled := fill(template, answers, workspace)
 	if filled.has("error"): return filled
 	var previous_errors: Array[String] = []
-	workspace.validate()
+	var check := func() -> void:
+		if workspace.heavy(): workspace.check_working()
+		else: workspace.validate()
+	check.call()
 	for diagnostic: Dictionary in workspace.diagnostics:
 		if diagnostic.severity == "error": previous_errors.append(diagnostic.message)
 	var error := workspace.transaction("Create " + (str(filled.name) if not str(filled.name).is_empty() else str(template.title)), func() -> String:
@@ -178,11 +181,11 @@ static func create(template: Dictionary, answers: Dictionary, workspace: PackWor
 				if row.def.type == str(question.kind).trim_suffix("?") and row.def.id == answers.get(question.key) and not row.doc.writable:
 					var problem := workspace.add_requirement(row.pack)
 					if not problem.is_empty(): return problem
-		workspace.validate()
+		check.call()
 		for diagnostic: Dictionary in workspace.diagnostics:
 			if diagnostic.severity == "error" and diagnostic.message not in previous_errors: return diagnostic.message
 		return "")
 	if not error.is_empty():
-		workspace.validate()
+		check.call()
 		return {"error": error}
 	return filled

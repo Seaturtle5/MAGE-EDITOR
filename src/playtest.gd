@@ -72,7 +72,9 @@ static func sample_values(sample: Dictionary) -> Dictionary:
 func arguments(workspace: PackWorkspace, begin: Dictionary, play: String = "", sample: Dictionary = {}) -> Dictionary:
 	if workspace.target.is_empty(): return {"error": "Open a pack first."}
 	if not begin.has("scenario") and str(begin.get("start", "")).is_empty(): return {"error": "The game needs a place to start in. Add a place to your pack first."}
-	workspace.validate()
+	# The game checks everything itself as it loads; with very many packs the quick check is enough here.
+	if workspace.heavy(): workspace.check_working()
+	else: workspace.validate()
 	var errors := workspace.diagnostics.filter(func(item: Dictionary) -> bool: return item.severity == "error")
 	if not errors.is_empty(): return {"error": "The game cannot start while the pack has problems. The first: " + str(errors[0].message)}
 	clear()

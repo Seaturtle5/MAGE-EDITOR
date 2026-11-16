@@ -845,7 +845,7 @@ func _add_chip_field(key: String, value: String) -> void:
 			else: _set_value(key, ", ".join(rest)))
 		flow.add_child(chip)
 	var add := PickerButton.new()
-	add.placeholder = "＋ Add…"
+	add.placeholder = "+ Add…"
 	add.text = add.placeholder
 	add.theme_type_variation = "AddRow"
 	add.allow_typing = true

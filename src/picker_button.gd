@@ -6,6 +6,8 @@ extends Button
 signal picked(value: String)
 ## Returns the choices: [{value, label, detail}].
 var options: Callable
+## The words for a value, when looking through every choice would be slow: func(value) -> String.
+var label_for: Callable
 ## Extra rows under the list: [{label, action: Callable}].
 var commands: Array[Dictionary] = []
 var value := ""
@@ -32,6 +34,9 @@ func set_value(next: String) -> void:
 	text = placeholder
 	if value.is_empty(): return
 	text = value.replace("_", " ")
+	if label_for.is_valid():
+		text = str(label_for.call(value))
+		return
 	for option: Dictionary in choices():
 		if option.value == value:
 			text = option.label
