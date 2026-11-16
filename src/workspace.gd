@@ -555,6 +555,7 @@ func known_words(list: String) -> Array:
 		"ending_flag": pattern = RegEx.create_from_string("\\bending flag ([a-z0-9_]+)")
 		"interest": pattern = RegEx.create_from_string("\\binterested in ([a-z_]+)")
 	for row: Dictionary in rows:
+		if list == "tag" and row.def.type in ["tag", "filter"]: found[row.def.id] = true
 		if list == "tag" and row.def.fields.has("tags"):
 			for tag: String in str(row.def.fields.tags.value).split(","):
 				if not tag.strip_edges().is_empty(): found[tag.strip_edges()] = true
@@ -564,6 +565,8 @@ func known_words(list: String) -> Array:
 	if pattern != null:
 		for path: String in documents:
 			for matched: RegExMatch in pattern.search_all(documents[path].text): found[matched.get_string(1)] = true
+	if list == "place_flag":
+		for flag: String in Validator.LOCATION_FLAGS: found[flag] = true
 	var result: Array = found.keys()
 	result.sort()
 	_words[list] = result

@@ -17,9 +17,14 @@ const REFERENCES := {
 const PRIMARY_FIELDS := ["name", "description", "pronouns", "image", "lives at", "found by", "repeat", "requires", "chance", "cooldown", "priority", "category", "weight", "level", "hp", "damage", "zone", "start"]
 const SWITCH_FIELDS := {
 	"item": ["consumed", "keep", "in combat", "plural"],
-	"creature": ["unique", "group", "infectious", "research bypass", "magic", "seduction immune"],
+	"creature": ["unique", "group", "infectious", "research bypass", "magic", "seduction immune", "name known"],
 	"event": ["active", "replaces trip"],
-	"menu": ["pause after each"]
+	"menu": ["pause after each"],
+	"captivity": ["pause after each"],
+	"condition": ["blocks rest"],
+	"shop": ["trades"],
+	"heat": ["female", "mpreg"],
+	"interest": ["default"]
 }
 const CHOICE_FIELDS := {
 	"event": {"repeat": ["once", "until resolved", "always"]},
@@ -28,8 +33,21 @@ const CHOICE_FIELDS := {
 const NUMBER_FIELDS := {
 	"item": ["weight"],
 	"event": ["priority", "cooldown"],
-	"creature": ["level", "hp", "damage", "libido", "hit bonus", "dodge bonus", "mind bonus"]
+	"creature": ["level", "hp", "damage", "libido", "hit bonus", "dodge bonus", "mind bonus"],
+	"feat": ["exploration bonus", "encounter bonus", "scavenge bonus"],
+	"game_mode": ["exploration bonus", "encounter bonus", "scavenge bonus", "carry bonus", "loot bonus"],
+	"meter": ["decay", "limit"],
+	"captivity": ["climax at"],
+	"scavenge_rules": ["target"],
+	"survival_rules": ["starving hint at", "journal hint below", "anticipation within"],
+	"combat_rules": ["unarmed damage"],
+	"heat": ["cycle", "duration"],
+	"rest_rules": ["duration", "fresh below", "fresh fatigue", "exhausted recovery", "hammock fresh fatigue", "hammock recovery", "collapse at", "collapse fatigue", "collapse turns"],
+	"ending": ["priority"],
+	"form": ["libido"]
 }
+## Lists of short words shown as chips; the value names where suggestions come from.
+const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": ""}
 
 var workspace: PackWorkspace
 var row: Dictionary = {}
@@ -57,6 +75,8 @@ var picker_rows: Array[Dictionary] = []
 var trigger_dialog: ConfirmationDialog
 var trigger_editor: EventTriggers
 var trigger_original := ""
+var condition_editor: ConditionDialog
+var condition_key := ""
 
 func _ready() -> void:
 	layout = AuthoringLayout.new()
@@ -556,6 +576,12 @@ func _add_field(key: String, kind: String) -> void:
 	if d.type == "item" and key == "infectious":
 		_add_item_form()
 		return
+	if is_condition_field(d.type, key) and (field == null or field.children.is_empty()) and (value.is_empty() or not Condition.compile(value).has("error")):
+		_add_condition_field(key, value)
+		return
+	if CHIP_FIELDS.has(key) and (field == null or field.children.is_empty()):
+		_add_chip_field(key, value)
+		return
 	if d.type == "item" and key == "use action":
 		var activity := OptionButton.new()
 		var activities := ["", "rest", "wait", "explore", "scavenge"]
@@ -697,6 +723,80 @@ func _add_field(key: String, kind: String) -> void:
 		choose.disabled = not doc.writable
 		choose.pressed.connect(_open_reference.bind(key))
 		line.add_child(choose)
+
+## Fields that hold a condition: "when", "requires" and everything ending in "when".
+static func is_condition_field(type: String, key: String) -> bool:
+	return key == "when" or key.ends_with(" when") or (key == "requires" and type != "event")
+
+## A condition shown in words, changed with the condition builder.
+func _add_condition_field(key: String, value: String) -> void:
+	var writable: bool = row.doc.writable
+	var line := HBoxContainer.new()
+	body.add_child(line)
+	var words := AuthoringLayout.label(BlockCatalog.condition_sentence(value, workspace) if not value.is_empty() else "Not set: no condition.", 15, value.is_empty())
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not value.is_empty(): words.theme_type_variation = "AccentLabel"
+	line.add_child(words)
+	var change := Button.new()
+	change.text = "Change…" if not value.is_empty() else "Set a condition…"
+	change.disabled = not writable
+	change.pressed.connect(func() -> void:
+		if condition_editor == null:
+			condition_editor = ConditionDialog.new()
+			add_child(condition_editor)
+			condition_editor.applied.connect(func(text: String) -> void:
+				if text.is_empty(): _clear_item_field(condition_key)
+				else:
+					_set_value(condition_key, text)
+					var current := _current_row()
+					if not current.is_empty(): workspace.require_condition(Condition.compile(text)))
+		condition_key = key
+		condition_editor.open(workspace, value, StoryBlocks.contexts(row), row.def.id if row.def.type == "event" else "", AuthoringCatalog.property(row.def.type, key, "text").title, true))
+	line.add_child(change)
+	if not value.is_empty():
+		var clear := Button.new()
+		clear.text = "Clear"
+		clear.disabled = not writable
+		clear.pressed.connect(func() -> void: _clear_item_field(key))
+		line.add_child(clear)
+
+## A list of short words as chips, with suggestions from the loaded packs.
+func _add_chip_field(key: String, value: String) -> void:
+	var writable: bool = row.doc.writable
+	var entries: Array[String] = []
+	for part: String in value.split(",", false):
+		if not part.strip_edges().is_empty(): entries.append(part.strip_edges())
+	var flow := HFlowContainer.new()
+	body.add_child(flow)
+	for entry: String in entries:
+		var chip := Button.new()
+		chip.theme_type_variation = "Chip"
+		chip.text = entry.replace("_", " ") + "  ✕"
+		chip.tooltip_text = "Remove “" + entry + "”"
+		chip.disabled = not writable
+		chip.pressed.connect(func() -> void:
+			var rest := entries.filter(func(other: String) -> bool: return other != entry)
+			if rest.is_empty(): _clear_item_field(key)
+			else: _set_value(key, ", ".join(rest)))
+		flow.add_child(chip)
+	var add := PickerButton.new()
+	add.placeholder = "＋ Add…"
+	add.text = add.placeholder
+	add.theme_type_variation = "AddRow"
+	add.allow_typing = true
+	add.disabled = not writable
+	var source: String = CHIP_FIELDS[key]
+	add.options = func() -> Array:
+		var result: Array = []
+		if source.is_empty(): return result
+		for word: String in workspace.known_words(source):
+			if word not in entries: result.append({"value": word, "label": word.replace("_", " ")})
+		return result
+	add.picked.connect(func(word: String) -> void:
+		var clean := word.strip_edges().to_lower()
+		if clean.is_empty() or clean in entries or "," in clean: return
+		_set_value(key, ", ".join(entries + [clean])))
+	flow.add_child(add)
 
 func _field_has_comments(doc: PackDocument, field: FscParser.Field) -> bool:
 	if field.children.is_empty():
