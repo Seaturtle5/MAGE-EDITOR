@@ -117,7 +117,7 @@ func show_uses(row: Dictionary) -> void:
 		uses_list.add_item(use_label(use))
 		uses_list.set_item_metadata(uses_list.item_count - 1, use)
 		uses_list.set_item_tooltip(uses_list.item_count - 1, "%s, line %d" % [str(use.row.doc.path).get_file(), int(use.line)])
-	uses_dialog.popup_centered()
+	AuthoringLayout.popup(uses_dialog, Vector2i(660, 460))
 
 func rename(row: Dictionary) -> void:
 	rename_row = row
@@ -128,7 +128,7 @@ func rename(row: Dictionary) -> void:
 	rename_id.editable = row.doc.writable
 	rename_dialog.title = "Rename " + Wording.title(row)
 	_refresh_rename()
-	rename_dialog.popup_centered()
+	AuthoringLayout.popup(rename_dialog, Vector2i(720, 520))
 	rename_name.grab_focus()
 	rename_name.select_all()
 
@@ -206,7 +206,7 @@ func delete(row: Dictionary) -> void:
 	delete_uses.button_pressed = not removable.is_empty()
 	delete_uses.text = "Remove the %d action%s and link%s that use it too (marked ✂)" % [removable.size(), "" if removable.size() == 1 else "s", "" if removable.size() == 1 else "s"]
 	delete_dialog.title = "Delete " + Wording.title(row)
-	delete_dialog.popup_centered()
+	AuthoringLayout.popup(delete_dialog, Vector2i(640, 400))
 
 ## A quest's stages, with the stories that set each one.
 func quest_flow(row: Dictionary) -> void:
@@ -267,7 +267,7 @@ func quest_flow(row: Dictionary) -> void:
 	if not reads.is_empty():
 		quest_body.add_child(AuthoringLayout.label("Stories that check this quest:", 15))
 		for use: Dictionary in reads: quest_body.add_child(AuthoringLayout.label("%s  %s   ·   %s" % [Wording.icon(use.row.def.type), Wording.title(use.row), use.text], 13, true))
-	if not quest_dialog.visible: quest_dialog.popup_centered()
+	if not quest_dialog.visible: AuthoringLayout.popup(quest_dialog, Vector2i(680, 540))
 
 func _set_stage_from(value: String, stage: String) -> void:
 	var parts := value.split(":")

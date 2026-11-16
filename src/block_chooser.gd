@@ -114,7 +114,7 @@ func open(pack: PackWorkspace, what: String = "action", where: Array = [], dropp
 	_suggest()
 	_list()
 	_show_form(current.get("entry", {}), current.get("slots", {}), current.get("quiet", false))
-	popup_centered_clamped(Vector2i(800, 640), 0.9)
+	AuthoringLayout.popup(self, Vector2i(800, 640))
 	search.grab_focus()
 
 func _suggest() -> void:
@@ -239,6 +239,11 @@ func _refresh_preview() -> void:
 	preview.text = ""
 	line_label.text = ""
 	if text.is_empty(): return
+	if not selected.is_empty():
+		for slot: Dictionary in selected.slots:
+			if not slot.hidden and not slot.optional and _peer(slot.name).is_empty():
+				preview.text = "Still to fill in:  " + BlockCatalog.slot_title(slot)
+				return
 	preview.text = "Preview:  " + (BlockCatalog.sentence(text, workspace) if kind == "action" else BlockCatalog.condition_sentence(text, workspace))
 	if EditorPrefs.read("authoring", "show_line", false): line_label.text = ("~ " if kind == "action" else "if ") + text
 

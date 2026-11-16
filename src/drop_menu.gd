@@ -55,7 +55,7 @@ func open(value: PackWorkspace, content: Dictionary, target: Dictionary) -> void
 				"form": actions.append({"label": "Mutate toward this form", "kind": "effect", "line": "infect " + source.def.id})
 	for action: Dictionary in actions: options.add_item(action.label)
 	if actions.size() > 1: options.select(1)
-	popup_centered()
+	AuthoringLayout.popup(self, Vector2i(500, 180))
 
 func _apply() -> void:
 	if source.is_empty() or actions.is_empty(): return

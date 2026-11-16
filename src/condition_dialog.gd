@@ -42,7 +42,7 @@ func open(workspace: PackWorkspace, text: String = "", context: Array = [], even
 	builder.configure(workspace, text, context, event)
 	error.text = ""
 	_refresh()
-	popup_centered_clamped(Vector2i(660, 520), 0.9)
+	AuthoringLayout.popup(self, Vector2i(660, 520))
 	if text.strip_edges().is_empty(): builder.add_to.call_deferred(builder.root)
 
 func _refresh() -> void:

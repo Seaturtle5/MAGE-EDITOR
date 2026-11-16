@@ -36,7 +36,7 @@ func open(workspace: PackWorkspace) -> void:
 		entries.append({"label": command, "search": command.to_lower(), "command": command})
 	search.text = ""
 	_filter()
-	popup_centered()
+	AuthoringLayout.popup(self, Vector2i(620, 460))
 	search.grab_focus()
 
 func _filter() -> void:

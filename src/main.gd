@@ -1233,7 +1233,7 @@ func _show_new() -> void:
 	if not relevant.is_empty():
 		_set_new_type(relevant[0])
 	_go_new_step(0)
-	new_dialog.popup_centered_clamped(Vector2i(840, 650), 0.9)
+	AuthoringLayout.popup(new_dialog, Vector2i(840, 620))
 
 func _set_new_type(type: String) -> void:
 	var found := false
@@ -1940,7 +1940,7 @@ func _offer_recovery() -> void:
 		if path is String: workspace.add_reference(path)
 	_refresh_all()
 	recovery_dialog.dialog_text = "A previous session left %d unsaved files. Restore them without changing the files on disk?" % draft.get("documents", []).size()
-	recovery_dialog.popup_centered()
+	AuthoringLayout.popup(recovery_dialog, Vector2i(520, 200))
 
 func _files_dropped(files: PackedStringArray) -> void:
 	if workspace.target.is_empty():
@@ -1958,7 +1958,7 @@ func _show_tour() -> void:
 	if tour == null: return
 	tour_step = 0
 	_update_tour()
-	tour.popup_centered()
+	AuthoringLayout.popup(tour, Vector2i(520, 260))
 
 func _update_tour() -> void:
 	var steps := ["1 / 5 · Library\nFind people, items, places and pictures on the left. Choose an entry or drag it to a matching picker.", "2 / 5 · Home tasks\nChoose a task on Home. Write names and prose, choose the links, then review before creating.", "3 / 5 · Stories\nThe board connects stories. Click a passage to write; responses can lead to another story or return.", "4 / 5 · Preview\nChoose a sample player under the side editor to preview text. Story actions are not applied.", "5 / 5 · Check and save\nCheck pack finds engine problems. Save all writes your changes. Undo, Redo and recovery drafts help you recover edits."]

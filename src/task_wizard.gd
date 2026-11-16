@@ -78,7 +78,7 @@ func open(value: PackWorkspace, data: Dictionary) -> void:
 	host.add_child(review)
 	pages.append(review)
 	go(0)
-	popup_centered_clamped(Vector2i(820, 600), 0.92)
+	AuthoringLayout.popup(self, Vector2i(820, 600))
 	if fields.has("name"): fields.name.grab_focus()
 
 func _question(page: VBoxContainer, question: Dictionary) -> void:

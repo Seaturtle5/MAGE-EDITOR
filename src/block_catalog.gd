@@ -54,6 +54,7 @@ const CHOICES := {
 	"armor": [["ignoring armor", "ignoring armor"], ["through half armor", "through half the armor"], ["without shield", "ignoring the shield"]],
 	"player_move": [["attack enemy", "attacks the enemy"], ["try to flee", "tries to flee"]],
 	"sort": [["random", "a shuffled"], ["reverse", "reverse"]],
+	"creature_gender": [["neuter", "neuter"], ["male neuter", "male neuter"], ["female neuter", "female neuter"], ["male", "male"], ["female", "female"], ["herm", "herm"], ["shemale", "shemale"], ["male herm", "male herm"], ["cuntboy", "cuntboy"], ["variable", "variable"]],
 }
 
 ## Suggestions for open words. The engine accepts any word here.
@@ -176,7 +177,16 @@ const ACTIONS := [
 	["form_sex", "Body", "The form {form} now gives the sex {sex}", "form {form:form} sex {sex:male|female|herm|neuter|unchanged}", "form sex gender"],
 	# Creatures.
 	["creature_number", "Creatures", "{creature}'s {field} {how} {amount}", "creature {creature:creature} {field:@creature_number} {how:@set_how} {amount:amount=1}", "creature stronger weaker damage health level"],
-	["creature_change", "Creatures", "{creature} now {field} {value}", "creature {creature:creature} {field:@creature_field} {value:plain}", "creature zone gender loot variant change"],
+	["creature_change.found", "Creatures", "{creature} is now found in {zones}", "creature {creature:creature} found in {zones:ids.zone}", "creature area zone found roam move"],
+	["creature_change.infectious", "Creatures", "{creature} is now infectious: {yes}", "creature {creature:creature} infectious {yes:yes|no}", "creature infectious"],
+	["creature_change.known", "Creatures", "The name of {creature} is now known: {yes}", "creature {creature:creature} name known {yes:yes|no}", "creature name known"],
+	["creature_change.unique", "Creatures", "{creature} is now unique: {yes}", "creature {creature:creature} unique {yes:yes|no}", "creature unique"],
+	["creature_change.gender", "Creatures", "{creature} now has the gender {gender}", "creature {creature:creature} gender {gender:@creature_gender}", "creature gender sex"],
+	["creature_change.variant", "Creatures", "{creature} now appears as its variant {variant}", "creature {creature:creature} variant {variant:word.variant}", "creature variant version"],
+	["creature_change.loot", "Creatures", "{creature} now drops {item}[ ({chance}% of the time)]", "creature {creature:creature} loot {item:item}[ {chance:int}%]", "creature loot drop item"],
+	["creature_change.image", "Creatures", "{creature}'s picture becomes {image}", "creature {creature:creature} image {image:image}", "creature picture image"],
+	["creature_change.strike", "Creatures", "{creature} now strikes with {stat}", "creature {creature:creature} strike with {stat:@attribute}", "creature strike attribute"],
+	["creature_change", "Creatures", "{creature} now {field} {value}", "creature {creature:creature} {field:@creature_field} {value:plain}", "creature title special change"],
 	# Intimacy and pregnancy.
 	["sex", "Intimacy", "Record sex: {taker} receives {act} from {giver}", "sex {taker:who} receives {act:word.act} from {giver:who}", "sex intimacy virginity partner record", "", "Records the act for virginity, partners and pregnancy chances."],
 	["impregnate", "Pregnancy", "{how}[ ({kind})][ by {father}][ ({eggs})]", "{how:@pregnancy}[ {kind:female|male|self}][ by {father:father}][ {eggs:?with eggs}]", "pregnancy impregnate chance father eggs"],
@@ -642,8 +652,13 @@ static func label(spec: Dictionary, value: String, workspace: PackWorkspace = nu
 		var at: int = spec.options.find(value)
 		return str(spec.labels[at]) if at >= 0 else value
 	if kind.begins_with("value"): return value_label(value, workspace)
-	if kind in ["amount", "expr", "exprs"]: return amount_label(value, workspace)
+	if kind in ["amount", "expr"]: return amount_label(value, workspace)
 	if kind in ["int", "text", "quoted", "script", "plain"] or kind.begins_with("phrase"): return value
+	if kind == "exprs":
+		var shown: Array[String] = []
+		for part: String in Effect._split_top(value): shown.append(amount_label(str(part), workspace))
+		return ", ".join(shown)
+	if kind == "father": return content_label("creature", value, workspace)
 	if kind.begins_with("ids"):
 		var names: Array[String] = []
 		for id: String in value.split(","): names.append(content_label(kind.get_slice(".", 1), id.strip_edges(), workspace))
@@ -652,8 +667,8 @@ static func label(spec: Dictionary, value: String, workspace: PackWorkspace = nu
 	return content_label(kind, value, workspace)
 
 static func content_label(kind: String, id: String, workspace: PackWorkspace = null) -> String:
-	if id in ["player", "enemy", "here", "nothing", "anything", "default", "outside", "nowhere"]:
-		return {"player": "the player", "enemy": "the enemy", "here": "this place"}.get(id, id)
+	if id in ["player", "enemy", "here", "nothing", "anything", "default", "outside", "nowhere", "none", "random creature"]:
+		return {"player": "the player", "enemy": "the enemy", "here": "this place", "random creature": "a random creature"}.get(id, id)
 	if workspace != null:
 		var title := workspace.title_of(kind, id)
 		if not title.is_empty(): return title

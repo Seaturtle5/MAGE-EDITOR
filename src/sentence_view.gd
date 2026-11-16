@@ -63,7 +63,7 @@ func _slot(piece: Dictionary, first: bool) -> void:
 	if not editable:
 		chip(label).disabled = true
 		return
-	if kind in ["choice", "switch", "int", "amount", "expr", "exprs", "text", "quoted", "plain", "father"] or kind.begins_with("ids"):
+	if kind in ["choice", "switch", "int", "amount", "expr", "exprs", "text", "quoted", "plain"] or kind.begins_with("ids"):
 		var button := chip(label, "Change " + BlockCatalog.slot_title(spec))
 		button.pressed.connect(_edit.bind(spec, button))
 		return

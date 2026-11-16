@@ -71,6 +71,22 @@ func _adapt() -> void:
 	sheet_scroll.custom_minimum_size = Vector2(0, 125) if stacked else Vector2(205, 0)
 	columns.get_child(1).size_flags_horizontal = Control.SIZE_EXPAND_FILL if stacked else Control.SIZE_FILL
 
+## Shows a dialog at a chosen size, centred, never larger than the window.
+## Wrapping labels first measure far too tall; the size is set again once
+## the dialog has its width.
+static func popup(dialog: Window, wanted: Vector2i) -> void:
+	var host := dialog.get_parent().get_window() if dialog.get_parent() != null else null
+	var limit := Vector2i(Vector2(host.size) * 0.92) if host != null else wanted
+	var size := Vector2i(mini(wanted.x, limit.x), mini(wanted.y, limit.y))
+	dialog.size = size
+	dialog.popup_centered(size)
+	for _frame in 2:
+		if not dialog.is_inside_tree(): return
+		await dialog.get_tree().process_frame
+		if not is_instance_valid(dialog) or not dialog.visible: return
+		dialog.size = size
+		dialog.move_to_center()
+
 static func clear(parent: Node) -> void:
 	for child: Node in parent.get_children():
 		parent.remove_child(child)

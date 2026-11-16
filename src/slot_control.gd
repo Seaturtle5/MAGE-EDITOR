@@ -12,7 +12,7 @@ var _read: Callable
 var _write: Callable
 var picker: PickerButton
 
-const SPECIAL := {"who": ["player"], "holder": ["player", "here"], "character": [], "location": [], "image": []}
+const SPECIAL := {"who": ["player"], "holder": ["player", "here"], "father": ["random creature"], "zone": ["nowhere", "outside"]}
 const VALUE_KINDS := {"value.flag": "flag", "value.number": "number", "value.time": "time", "value.list": "list", "value.text": "text", "value.states": "states"}
 const VALUE_WORDS := {"flag": "something to remember", "number": "counter", "time": "time", "list": "list", "text": "text", "states": "stage or mood"}
 
@@ -41,7 +41,8 @@ func _build() -> void:
 	elif kind == "int": _build_number()
 	elif kind == "amount": _build_amount()
 	elif kind == "expr": _build_expression()
-	elif kind in ["text", "quoted", "plain", "exprs", "father"] or kind.begins_with("ids"): _build_text()
+	elif kind.begins_with("ids") or kind == "exprs": _build_list()
+	elif kind in ["text", "quoted", "plain"]: _build_text()
 	else: _build_picker()
 
 func _build_switch() -> void:
@@ -188,6 +189,74 @@ func _build_text() -> void:
 	_read = func() -> String: return input.text.strip_edges()
 	_write = func(next: String) -> void: input.text = next
 
+## Several entries as chips: content IDs chosen from a list, or list entries
+## (numbers and texts) typed one at a time.
+func _build_list() -> void:
+	var content: bool = str(spec.kind).begins_with("ids")
+	var entries: Array[String] = []
+	var flow := HFlowContainer.new()
+	flow.custom_minimum_size.x = 320
+	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_child(flow)
+	var single := {"name": "entry", "kind": str(spec.kind).get_slice(".", 1) if content else "", "default": "", "hidden": false, "optional": false}
+	var show := [Callable()]
+	show[0] = func() -> void:
+		for child: Node in flow.get_children():
+			flow.remove_child(child)
+			child.queue_free()
+		for entry: String in entries:
+			var chip := Button.new()
+			chip.theme_type_variation = "Chip"
+			chip.text = (BlockCatalog.content_label(str(single.kind), entry, workspace) if content else BlockCatalog.amount_label(entry, workspace)) + "  ✕"
+			chip.tooltip_text = "Remove"
+			chip.pressed.connect(func() -> void:
+				entries.erase(entry)
+				show[0].call()
+				edited.emit())
+			flow.add_child(chip)
+		if content:
+			var add := PickerButton.new()
+			add.placeholder = "＋ Add…"
+			add.text = add.placeholder
+			add.theme_type_variation = "AddRow"
+			add.allow_typing = true
+			add.workspace = workspace
+			add.drop_kinds = _content_types(str(single.kind))
+			add.options = func() -> Array:
+				var result: Array = []
+				for special: String in SPECIAL.get(str(single.kind), []): result.append({"value": special, "label": special})
+				for row: Dictionary in workspace.rows:
+					if row.def.type in add.drop_kinds and row.def.mode != "extend" and row.def.id not in entries: result.append({"value": row.def.id, "label": Wording.title(row), "detail": "" if row.doc.writable else str(row.pack)})
+				return result
+			add.picked.connect(func(id: String) -> void:
+				if id.is_empty() or id in entries: return
+				entries.append(id)
+				show[0].call()
+				edited.emit())
+			flow.add_child(add)
+		else:
+			var input := LineEdit.new()
+			input.placeholder_text = "Add a number or a text, then Enter"
+			input.custom_minimum_size.x = 250
+			input.text_submitted.connect(func(text: String) -> void:
+				var clean := text.strip_edges()
+				if clean.is_empty(): return
+				# A number, a saved value or a calculation stays as it is; other words are a text.
+				var raw := clean if clean.is_valid_int() or clean.begins_with("\"") or (not Expr.parse(clean).has("error") and RegEx.create_from_string("[.()+*/-]|^entry |^count ").search(clean) != null) else "\"" + clean.replace("\"", "'") + "\""
+				entries.append(raw)
+				show[0].call()
+				edited.emit()
+				for child: Node in flow.get_children():
+					if child is LineEdit: (child as LineEdit).grab_focus())
+			flow.add_child(input)
+	show[0].call()
+	_read = func() -> String: return ", ".join(entries)
+	_write = func(next: String) -> void:
+		entries.clear()
+		for part: Variant in (next.split(",", false) if content else Effect._split_top(next)):
+			if not str(part).strip_edges().is_empty(): entries.append(str(part).strip_edges())
+		show[0].call()
+
 func _value_picker(kind: String) -> PickerButton:
 	var button := PickerButton.new()
 	var wanted: String = VALUE_KINDS.get(kind, "")
@@ -234,6 +303,7 @@ static func _content_types(kind: String) -> Array:
 		"who": return ["character", "creature"]
 		"holder": return ["character", "location"]
 		"form": return ["form", "creature"]
+		"father": return ["creature", "character"]
 		"script": return ["scene"]
 	return [kind] if kind in PackWorkspace.types() else []
 
@@ -262,6 +332,7 @@ func _options() -> Array:
 		for word: String in workspace.known_words(kind.get_slice(".", 1)): result.append({"value": word, "label": word.replace("_", " ")})
 		return result
 	for special: String in SPECIAL.get(kind, []): result.append({"value": special, "label": BlockCatalog.content_label(kind, special, workspace)})
+	if kind == "item" and peers.is_valid() and not _peer("creature").is_empty(): result.append({"value": "none", "label": "nothing"})
 	var types := _content_types(kind)
 	var seen: Dictionary = {}
 	for row: Dictionary in workspace.rows:

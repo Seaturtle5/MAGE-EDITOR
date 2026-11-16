@@ -211,7 +211,7 @@ func _open_settings() -> void:
 			value_picker.set_item_metadata(value_picker.item_count - 1, key)
 	_select_value(0)
 	settings_error.text = "%d sample values set. These settings never change the pack or game saves." % overrides.size()
-	settings_dialog.popup_centered()
+	AuthoringLayout.popup(settings_dialog, Vector2i(460, 380))
 
 func _select_value(index: int) -> void:
 	for child: Node in settings_values.get_children():

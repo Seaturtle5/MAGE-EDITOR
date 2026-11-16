@@ -784,7 +784,7 @@ func _explain(entry: Dictionary) -> void:
 		"show": text = "Changes the picture shown with the story."
 		"page_break": text = "The game waits here until the player continues."
 	explain.dialog_text = text + "\n\nIn the content format, line %d:\n%s" % [int(entry.line), StoryGraph._lines(row.doc)[int(entry.line) - 1].strip_edges()]
-	explain.popup_centered()
+	AuthoringLayout.popup(explain, Vector2i(520, 260))
 
 # ---------------------------------------------------------------- clipboard
 
@@ -1111,6 +1111,6 @@ func _edit_response(entry: Dictionary) -> void:
 	response_fields.always.button_pressed = node.get("always_shown", false)
 	response_fields.error.text = ""
 	response_fields.show.call()
-	response_dialog.popup_centered()
+	AuthoringLayout.popup(response_dialog, Vector2i(560, 380))
 	response_fields.label.grab_focus()
 	response_fields.label.select_all()
