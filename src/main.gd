@@ -327,7 +327,7 @@ func _build_ui() -> void:
 	browser = ContentLibrary.new()
 	browser.hide_root = true
 	browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	browser.item_selected.connect(_on_browser_selected)
+	browser.open_requested.connect(_on_browser_selected)
 	browser.item_collapsed.connect(_fill_library_section)
 	left.add_child(browser)
 	var hint := _label("Drag entries into a story or onto the map.", 12)

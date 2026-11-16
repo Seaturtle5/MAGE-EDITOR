@@ -254,6 +254,14 @@ func _ghost(text: String, tooltip: String = "", variation: String = "Ghost") -> 
 	button.focus_mode = Control.FOCUS_NONE
 	return button
 
+func _add_button(text: String, tooltip: String) -> AddButton:
+	var button := AddButton.new()
+	button.text = text
+	button.tooltip_text = tooltip
+	button.theme_type_variation = "AddRow"
+	button.focus_mode = Control.FOCUS_NONE
+	return button
+
 func _link(text: String, action: Callable, tooltip: String = "") -> Label:
 	var label := AuthoringLayout.label(text, 15)
 	label.theme_type_variation = "AccentLabel"
@@ -480,6 +488,14 @@ class AddHere extends HBoxContainer:
 	func _drop_data(_position: Vector2, data: Variant) -> void:
 		dropped.emit(data)
 
+## A button of an "add here" row: what is dropped on it lands in its row.
+class AddButton extends Button:
+	func _can_drop_data(position: Vector2, data: Variant) -> bool:
+		return (get_parent() as AddHere)._can_drop_data(position, data)
+
+	func _drop_data(position: Vector2, data: Variant) -> void:
+		(get_parent() as AddHere)._drop_data(position, data)
+
 func _add_row(host: VBoxContainer, parent: Dictionary, in_fight: bool) -> void:
 	if not row.doc.writable: return
 	var bar := AddHere.new()
@@ -490,13 +506,13 @@ func _add_row(host: VBoxContainer, parent: Dictionary, in_fight: bool) -> void:
 	bar.dropped.connect(func(data: Dictionary) -> void: _dropped(data, StoryBlocks.end_spot(row, entries, parent)))
 	host.add_child(bar)
 	var spot := func() -> Dictionary: return StoryBlocks.end_spot(row, entries, parent)
-	var text := _ghost("+ Text", "Add speech or narration here (Ctrl+Enter).", "AddRow")
+	var text := _add_button("+ Text", "Add speech or narration here (Ctrl+Enter). Library entries can be dropped here.")
 	text.pressed.connect(func() -> void: _write({}, spot.call(), bar))
 	bar.add_child(text)
-	var action := _ghost("+ Action", "Add something that happens: give an item, change a counter, move the player…", "AddRow")
+	var action := _add_button("+ Action", "Add something that happens: give an item, change a counter, move the player… Library entries can be dropped here.")
 	action.pressed.connect(func() -> void: _choose_action(spot.call(), in_fight))
 	bar.add_child(action)
-	var more := _ghost("+ More ▾", "Conditions, responses, links to other stories, pictures, pauses and fights.", "AddRow")
+	var more := _add_button("+ More ▾", "Conditions, responses, links to other stories, pictures, pauses and fights.")
 	more.pressed.connect(func() -> void: _open_add_menu(more, spot.call(), in_fight))
 	bar.add_child(more)
 	bar.set_meta("spot", spot)
@@ -624,7 +640,7 @@ func _dropped(data: Dictionary, spot: Dictionary) -> void:
 			chooser._show_form(offer.entry, offer.slots, false))
 	menu.popup_hide.connect(menu.queue_free)
 	add_child(menu)
-	menu.popup(Rect2i(DisplayServer.mouse_get_position(), Vector2i.ZERO))
+	menu.popup(Rect2i(_pointer(), Vector2i.ZERO))
 
 ## What dropping a piece of library content into a story can mean.
 func drop_offers(content: Dictionary) -> Array:
@@ -772,7 +788,7 @@ func _open_add_menu(anchor: Control, spot: Dictionary, in_fight: bool) -> void:
 		picture.edited.connect(func() -> void:
 			_insert(spot, "show " + picture.value(), "Show a picture")
 			picture.queue_free())
-		picture.picker.open(DisplayServer.mouse_get_position()))
+		picture.picker.open(_pointer()))
 	add.call("⏸  Pause until the player continues", func() -> void: _insert(spot, "---", "Add a pause"))
 	add.call("⚔  Fight a creature…", func() -> void:
 		var creature := SlotControl.make(workspace, {"name": "creature", "kind": "creature", "default": "", "hidden": false, "optional": false}, "")
@@ -781,7 +797,7 @@ func _open_add_menu(anchor: Control, spot: Dictionary, in_fight: bool) -> void:
 		creature.edited.connect(func() -> void:
 			_insert(spot, "fight " + creature.value() + ":\n    won:\n    lost:", "Add a fight")
 			creature.queue_free())
-		creature.picker.open(DisplayServer.mouse_get_position()))
+		creature.picker.open(_pointer()))
 	menu.add_separator()
 	add.call("Paste", func() -> void: _paste(spot))
 	menu.id_pressed.connect(func(id: int) -> void: actions[id].call())
@@ -796,7 +812,7 @@ func _pick_story(_anchor: Control, with_endings: bool, then: Callable) -> void:
 	picker.picked.connect(func(target: String) -> void:
 		then.call(target)
 		picker.queue_free())
-	picker.open(DisplayServer.mouse_get_position())
+	picker.open(_pointer())
 
 func _explain(entry: Dictionary) -> void:
 	var node: Dictionary = entry.node
@@ -921,6 +937,11 @@ func _focus_line(line: int) -> void:
 		if int(entry.line) <= line and line < maxi(int(entry.end_line), int(entry.line) + 1): best = panels[key]
 	if best == null: return
 	_reveal.call_deferred(best)
+
+## Where the pointer is, in the coordinates popups are placed in (the same
+## as a control's screen position, whether or not windows are embedded).
+func _pointer() -> Vector2i:
+	return Vector2i(get_screen_position() + get_local_mouse_position())
 
 func _reveal(control: Control) -> void:
 	if not is_instance_valid(control) or not control.is_inside_tree() or not block_scroll.is_ancestor_of(control): return
@@ -1065,7 +1086,7 @@ func _insert_markup(input: TextEdit, what: String) -> void:
 		input.insert_text_at_caret("[" + control.value() + "]" if what == "value" else "[" + what + " of " + control.value() + "]")
 		input.grab_focus()
 		control.queue_free())
-	control.picker.open(DisplayServer.mouse_get_position())
+	control.picker.open(_pointer())
 
 # ---------------------------------------------------------------- responses
 
