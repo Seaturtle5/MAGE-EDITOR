@@ -99,6 +99,15 @@ var toast_undo: Button
 var crumbs: Label
 var actions: ContentActions
 var content_tools: HBoxContainer
+var value_title: Label
+var history_dialog: AcceptDialog
+var history_list: ItemList
+var visited: Array[Dictionary] = []
+var visit_at := -1
+var visiting := false
+var back_button: Button
+var forward_button: Button
+var value_uses: ItemList
 var playtest := Playtest.new()
 var play_menu: MenuButton
 const SCALES := [90, 100, 110, 125, 150]
@@ -197,7 +206,7 @@ func _build_ui() -> void:
 	file_menu.flat = false
 	file_menu.tooltip_text = "Create or open a pack, add other packs to use their content, import pictures."
 	var popup := file_menu.get_popup()
-	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["", -1], ["Delete the selected content…", 4]]:
+	for entry: Array in [["New pack…", 0], ["Open pack…", 1], ["Add another pack to use its content…", 2], ["Import a picture…", 3], ["", -1], ["Check pack", 5], ["Save all      Ctrl+S", 6], ["History of changes…", 7], ["", -1], ["Delete the selected content…", 4]]:
 		if entry[1] < 0: popup.add_separator()
 		else: popup.add_item(entry[0], entry[1])
 	popup.id_pressed.connect(_on_pack_menu)
@@ -319,6 +328,12 @@ func _build_ui() -> void:
 	navigation = HBoxContainer.new()
 	navigation.add_theme_constant_override("separation", 2)
 	center.add_child(navigation)
+	back_button = _button("‹", _go_back, "Back to what you looked at before (Alt+←).")
+	back_button.theme_type_variation = "Ghost"
+	navigation.add_child(back_button)
+	forward_button = _button("›", _go_forward, "Forward again (Alt+→).")
+	forward_button.theme_type_variation = "Ghost"
+	navigation.add_child(forward_button)
 	var nav_group := ButtonGroup.new()
 	for place: Array in [["🏠 Home", 6, "Start here: tasks, recent work and problems."], ["💬 Stories", 3, "The board of stories and how they connect."], ["🧭 Map", 5, "Places, the paths between them and what happens there."], ["📋 Details", 4, "Everything about the selected content."]]:
 		var button := _button(place[0], _navigate.bind(place[1]), place[2])
@@ -435,7 +450,17 @@ func _build_ui() -> void:
 	values_box.add_child(values_search)
 	values_list = ItemList.new()
 	values_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	values_list.item_selected.connect(_inspect_value)
 	values_box.add_child(values_list)
+	value_title = _label("Choose a value to see where it is changed and read.", 13)
+	value_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	values_box.add_child(value_title)
+	value_uses = ItemList.new()
+	value_uses.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	value_uses.item_activated.connect(func(index: int) -> void:
+		var use: Variant = value_uses.get_item_metadata(index)
+		if use is Dictionary: _open_line(use.row.doc.path, int(use.line)))
+	values_box.add_child(value_uses)
 	var diag_box := VBoxContainer.new()
 	diag_box.name = "Problems"
 	side_tabs.add_child(diag_box)
@@ -479,6 +504,7 @@ func _on_pack_menu(id: int) -> void:
 		4: _ask_delete()
 		5: _validate()
 		6: _save_all()
+		7: _show_history()
 
 func _set_side_panel(open: bool) -> void:
 	side_panel.visible = open
@@ -722,6 +748,76 @@ func _play(begin: Dictionary, play: String = "") -> void:
 		return
 	_set_status("The game is starting in its own window" + (", with your unsaved changes" if workspace.dirty_count() > 0 else "") + ". It uses its own saves; nothing here changes.")
 
+## Every change so far, newest first. Choosing one undoes or redoes up to it.
+func _show_history() -> void:
+	if history_dialog == null:
+		history_dialog = AcceptDialog.new()
+		history_dialog.title = "History of changes"
+		history_dialog.ok_button_text = "Close"
+		var body := VBoxContainer.new()
+		history_dialog.add_child(body)
+		body.add_child(AuthoringLayout.label("Double-click a change to go back to just after it. Later changes can be brought back with Redo.", 13, true))
+		history_list = ItemList.new()
+		history_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		history_list.custom_minimum_size = Vector2(480, 300)
+		history_list.item_activated.connect(func(index: int) -> void:
+			var wanted: int = history_list.get_item_metadata(index)
+			if not _entries_ready(): return
+			while workspace.history.cursor > wanted: workspace.undo()
+			while workspace.history.cursor < wanted: workspace.redo()
+			_after_history("Went back in the history")
+			_fill_history())
+		body.add_child(history_list)
+		add_child(history_dialog)
+	_fill_history()
+	AuthoringLayout.popup(history_dialog, Vector2i(540, 440))
+
+func _fill_history() -> void:
+	history_list.clear()
+	var steps := workspace.history.steps
+	for index in range(steps.size() - 1, -1, -1):
+		var undone: bool = index >= workspace.history.cursor
+		history_list.add_item(("↶ " if undone else ("➤ " if index == workspace.history.cursor - 1 else "    ")) + str(steps[index].label) + ("   (undone)" if undone else ""))
+		history_list.set_item_metadata(history_list.item_count - 1, index + 1)
+	history_list.add_item("    The pack as it was opened")
+	history_list.set_item_metadata(history_list.item_count - 1, 0)
+
+## Remembers what is being looked at, for Back and Forward.
+func _remember_visit() -> void:
+	if visiting or back_button == null: return
+	var entry := {"tab": tabs.current_tab}
+	if not selected.is_empty() and selected.has("def") and tabs.current_tab != 6:
+		entry.merge({"path": selected.doc.path, "type": selected.def.type, "id": selected.def.id, "mode": selected.def.mode, "ordinal": selected.get("ordinal", 0)})
+		if tabs.current_tab == 3 and not story_editor.row.is_empty(): entry.story = story_editor.row.get("script_field", "")
+	if visit_at >= 0 and visited[visit_at] == entry: return
+	visited.resize(visit_at + 1)
+	visited.append(entry)
+	if visited.size() > 60: visited.pop_front()
+	visit_at = visited.size() - 1
+	back_button.disabled = visit_at <= 0
+	forward_button.disabled = true
+
+func _go_back() -> void:
+	_go_visit(visit_at - 1)
+
+func _go_forward() -> void:
+	_go_visit(visit_at + 1)
+
+func _go_visit(index: int) -> void:
+	if index < 0 or index >= visited.size() or not _entries_ready(): return
+	var entry: Dictionary = visited[index]
+	visiting = true
+	if entry.has("path"):
+		var row := workspace.find_row(entry.path, entry.type, entry.id, entry.mode, entry.ordinal)
+		if not row.is_empty():
+			if str(entry.get("story", "")).is_empty(): _open_world_content(row)
+			else: _open_visual_script(row, str(entry.story))
+	_navigate(int(entry.tab))
+	visiting = false
+	visit_at = index
+	back_button.disabled = visit_at <= 0
+	forward_button.disabled = visit_at >= visited.size() - 1
+
 ## Where the author is: pack, kind, content and story.
 func _refresh_crumbs() -> void:
 	if crumbs == null: return
@@ -736,6 +832,7 @@ func _refresh_crumbs() -> void:
 		parts.append(StoryEditor.story_name(story_editor.row))
 	crumbs.text = " › ".join(parts)
 	crumbs.tooltip_text = crumbs.text
+	_remember_visit()
 
 func _show_error(text: String) -> void:
 	if text.is_empty():
@@ -1166,16 +1263,35 @@ func _refresh_values() -> void:
 	keys.sort()
 	for key: String in keys:
 		var declaration: Dictionary = workspace.db.values[key]
-		if not values_search.text.is_empty() and values_search.text.to_lower() not in (key + " " + str(declaration.get("kind", ""))).to_lower():
+		if not values_search.text.is_empty() and values_search.text.to_lower() not in (key + " " + BlockCatalog.value_label(key, workspace) + " " + str(declaration.get("kind", ""))).to_lower():
 			continue
 		var states: String = ", ".join(declaration.get("states", []))
-		values_list.add_item(key + "  ·  " + str(declaration.get("kind", "value")) + ("  ·  " + states if not states.is_empty() else ""))
+		values_list.add_item(BlockCatalog.value_label(key, workspace) + "  ·  " + str(SlotControl.VALUE_WORDS.get(str(declaration.get("kind", "")), "value")) + ("  ·  " + states.replace("_", " ") if not states.is_empty() else ""))
+		values_list.set_item_tooltip(values_list.item_count - 1, key)
 		values_list.set_item_metadata(values_list.item_count - 1, key)
 	for key: String in Validator.PLAYER_VALUES:
 		if not values_search.text.is_empty() and values_search.text.to_lower() not in ("player." + key).to_lower():
 			continue
-		values_list.add_item("player." + key + "  ·  player value")
+		values_list.add_item("the player's " + key.replace("_", " ").replace(".", " ") + "  ·  player")
 		values_list.set_item_metadata(values_list.item_count - 1, "player." + key)
+
+## Lists where a saved value is changed and where it is read, in your pack.
+func _inspect_value(index: int) -> void:
+	var path := str(values_list.get_item_metadata(index))
+	var uses := workspace.value_uses(path)
+	var changed := uses.filter(func(use: Dictionary) -> bool: return use.changes)
+	var read := uses.filter(func(use: Dictionary) -> bool: return not use.changes)
+	value_title.text = "%s: changed in %d place%s, read in %d. Double-click to open." % [BlockCatalog.value_label(path, workspace), changed.size(), "" if changed.size() == 1 else "s", read.size()]
+	value_uses.clear()
+	for group: Array in [["Changed by", changed], ["Read by", read]]:
+		if group[1].is_empty(): continue
+		value_uses.add_item(group[0])
+		value_uses.set_item_disabled(value_uses.item_count - 1, true)
+		for use: Dictionary in group[1]:
+			var words: String = BlockCatalog.sentence(str(use.text).trim_prefix("~").strip_edges(), workspace) if str(use.text).begins_with("~") else str(use.text)
+			value_uses.add_item("   %s %s   ·   %s" % [Wording.icon(use.row.def.type), Wording.title(use.row), words])
+			value_uses.set_item_metadata(value_uses.item_count - 1, use)
+			value_uses.set_item_tooltip(value_uses.item_count - 1, str(use.text))
 
 func _insert_reference(index: int) -> void:
 	var data: Dictionary = references.get_item_metadata(index)
@@ -1968,8 +2084,19 @@ func _palette_chosen(entry: Dictionary) -> void:
 			"Redo": _redo()
 			"Tour": _show_tour()
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_XBUTTON1, MOUSE_BUTTON_XBUTTON2]:
+		if event.button_index == MOUSE_BUTTON_XBUTTON1: _go_back()
+		else: _go_forward()
+		get_viewport().set_input_as_handled()
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo: return
+	if event.alt_pressed and event.keycode in [KEY_LEFT, KEY_RIGHT]:
+		if event.keycode == KEY_LEFT: _go_back()
+		else: _go_forward()
+		get_viewport().set_input_as_handled()
+		return
 	if event.ctrl_pressed or event.meta_pressed:
 		match event.keycode:
 			KEY_K: _find_anything()

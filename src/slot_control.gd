@@ -294,6 +294,9 @@ func _build_picker() -> void:
 		picker.options = _options
 		picker.drop_kinds = _content_types(kind)
 		picker.picked.connect(func(_next: String) -> void: edited.emit())
+		# Results and stages can be made where they are first needed.
+		if kind == "result": picker.commands = [{"label": "＋ New result…", "action": func() -> void: _new_word("result", "What can come of this event? One or two words, such as “taken” or “left behind”.")}]
+		if kind == "stage": picker.commands = [{"label": "＋ New stage…", "action": func() -> void: _new_word("stage", "The next step of the quest, in one or two words.")}]
 	add_child(picker)
 	_read = func() -> String: return picker.value
 	_write = func(next: String) -> void: picker.set_value(next)
@@ -340,6 +343,42 @@ func _options() -> Array:
 		seen[row.def.id] = true
 		result.append({"value": row.def.id, "label": Wording.title(row), "detail": ("" if row.doc.writable else str(row.pack)) + (" · " + Wording.name(row.def.type) if types.size() > 1 else "")})
 	return result
+
+## Adds a result to the event, or a stage to the quest, the sentence names.
+func _new_word(kind: String, hint: String) -> void:
+	var owner := (_peer("event") if not _peer("event").is_empty() else _peer("@event")) if kind == "result" else _peer("quest")
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "New " + kind
+	dialog.ok_button_text = "Add"
+	dialog.dialog_hide_on_ok = false
+	var body := VBoxContainer.new()
+	body.custom_minimum_size.x = 360
+	dialog.add_child(body)
+	body.add_child(AuthoringLayout.label(hint if not owner.is_empty() else ("Choose the event first." if kind == "result" else "Choose the quest first."), 14, true))
+	var input := LineEdit.new()
+	input.editable = not owner.is_empty()
+	body.add_child(input)
+	var problem := AuthoringLayout.label("", 13)
+	problem.theme_type_variation = "ErrorLabel"
+	body.add_child(problem)
+	dialog.register_text_enter(input)
+	dialog.confirmed.connect(func() -> void:
+		if owner.is_empty():
+			dialog.hide()
+			return
+		var id := workspace.unique_id(input.text, kind)
+		var error := workspace.transaction("New %s “%s”" % [kind, input.text.strip_edges()], func() -> String:
+			if input.text.strip_edges().is_empty(): return "Give it a name."
+			return workspace.add_outcome(owner, id) if kind == "result" else workspace.add_stage(owner, id))
+		if not error.is_empty():
+			problem.text = error
+			return
+		dialog.hide()
+		picker.choose(id))
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+	input.grab_focus()
 
 ## Declares a value where it is first needed: only a name and an owner are asked.
 func _new_value(button: PickerButton, kind: String) -> void:

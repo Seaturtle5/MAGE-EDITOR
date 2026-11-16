@@ -518,6 +518,33 @@ func title_of(type: String, id: String) -> String:
 		_titles_revision = revision
 	return _titles.get(type + ":" + id, _titles.get(":" + id, "") if type in ["", "who", "holder"] else "")
 
+## Adds a named result to an event's outcomes, so stories can record and check it.
+func add_outcome(event: String, name: String) -> String:
+	if RegEx.create_from_string("^[a-z_][a-z0-9_]*$").search(name) == null: return "Use a name of letters and numbers."
+	for row: Dictionary in rows:
+		if not row.doc.writable or row.def.type != "event" or row.def.id != event or row.def.mode == "replace": continue
+		var field: FscParser.Field = row.def.fields.get("outcomes")
+		if field != null and not field.children.is_empty(): return "These results use a layout that must be kept."
+		var existing: String = field.value if field != null else ""
+		for part: String in existing.split(","):
+			if part.strip_edges().get_slice("=", 0).strip_edges() == name: return ""
+		return row.doc.set_field(row.def, "outcomes", (existing + ", " if not existing.is_empty() else "") + name)
+	return "Choose an event of your own pack to add a result to."
+
+## Adds a stage at the end of a quest's stages.
+func add_stage(quest: String, name: String) -> String:
+	if RegEx.create_from_string("^[a-z_][a-z0-9_]*$").search(name) == null: return "Use a name of letters and numbers."
+	if name in preview_content().quests.get(quest, {}).get("stages", []): return ""
+	for row: Dictionary in rows:
+		if not row.doc.writable or row.def.type != "quest" or row.def.id != quest or row.def.mode == "replace": continue
+		var field: FscParser.Field = row.def.fields.get("stages")
+		if field == null or field.children.is_empty(): return "This quest has no list of stages to add to."
+		var lines := StoryGraph._lines(row.doc)
+		StoryGraph._insert_line(row.doc, lines, field.children[-1].number, "    " + name)
+		StoryGraph._save_lines(row.doc, lines)
+		return ""
+	return "Choose a quest of your own pack to add a stage to."
+
 ## Adds "name: spec" to a definition's values (for example "trust: number 0").
 func declare_value(type: String, id: String, name: String, spec: String) -> String:
 	if RegEx.create_from_string("^[a-z_][a-z0-9_]*$").search(name) == null: return "Use a name of letters and numbers."
@@ -632,3 +659,25 @@ func hints(row: Dictionary) -> Array[String]:
 		_:
 			notes.append(Wording.name(definition.type))
 	return notes
+
+
+## Every place in the working pack that changes or reads a saved value:
+## [{row, line, text, changes}]. "adam.trust + 1" changes; a condition reads.
+func value_uses(path: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var token := RegEx.create_from_string("(?<![a-z0-9_.])" + path.replace(".", "\\.") + "(?![a-z0-9_.])")
+	var change := RegEx.create_from_string("^~\\s*(?:" + path.replace(".", "\\.") + " (?:=|\\+|-|earlier|later)|(?:add|remove|clear|sort|ask) .*" + path.replace(".", "\\.") + ")")
+	var short := path.trim_prefix("player.") if path.begins_with("player.") else ""
+	var stat := RegEx.create_from_string("^~\\s*" + short + " [+-] ") if not short.is_empty() else null
+	var quest := RegEx.create_from_string("\\bquest " + path.trim_prefix("quest.") + "\\b") if path.begins_with("quest.") else null
+	for row: Dictionary in rows:
+		if not row.doc.writable: continue
+		var lines: PackedStringArray = str(row.doc.block(row.def)).split("\n")
+		for index in range(1, lines.size()):
+			var clean := lines[index].strip_edges()
+			if clean.is_empty() or clean.begins_with("//"): continue
+			var code := ContentTools.code_text(lines[index].trim_suffix("\r"))
+			var changes: bool = change.search(clean) != null or (stat != null and stat.search(clean) != null) or (quest != null and clean.begins_with("~ quest "))
+			if token.search(code) == null and not (stat != null and stat.search(clean) != null) and not (quest != null and quest.search(code) != null): continue
+			result.append({"row": row, "line": int(row.def.line) + index, "text": clean, "changes": changes})
+	return result
