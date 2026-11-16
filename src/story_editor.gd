@@ -128,7 +128,14 @@ func refresh() -> void:
 	if blocks == null or workspace == null: return
 	drawn_revision = workspace.revision
 	writer = null
-	AuthoringLayout.clear(blocks)
+	# The list is built away from the window and put in at once: adding
+	# blocks one by one to what is on screen costs far more.
+	var scrolled := block_scroll.scroll_vertical
+	block_scroll.remove_child(blocks)
+	blocks.queue_free()
+	blocks = VBoxContainer.new()
+	blocks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	blocks.add_theme_constant_override("separation", 5)
 	panels.clear()
 	badges.clear()
 	entries = []
@@ -140,6 +147,7 @@ func refresh() -> void:
 	if row.is_empty():
 		heading.text = "Choose a story"
 		blocks.add_child(AuthoringLayout.label("Choose a story card on the board, or an entry in the library, to see its blocks here.", 15, true))
+		block_scroll.add_child(blocks)
 		preview.show_story(workspace, row)
 		return
 	snapshot = row.doc.text
@@ -152,6 +160,8 @@ func refresh() -> void:
 	elif entries.is_empty():
 		blocks.add_child(AuthoringLayout.label("Nothing happens here yet. Add the first block, or drop something from the library.", 14, true))
 	_render("", blocks, "fight" in StoryBlocks.contexts(row))
+	block_scroll.add_child(blocks)
+	block_scroll.set_deferred("scroll_vertical", scrolled)
 	preview.show_story(workspace, row)
 	if check_timer != null and checked_revision != workspace.revision: check_timer.start()
 	if focus_line > 0: _focus_line.call_deferred(focus_line)
@@ -225,9 +235,7 @@ func _bar(entry: Dictionary, body: VBoxContainer, icon: String) -> HBoxContainer
 	var movable: bool = row.doc.writable and not unit.node.has("inline_field") and unit.node.kind not in ["outcome", "choices"] and (entry.node.kind != "branch" or is_same(_first_branch(unit), entry))
 	var handle := BlockHandle.new()
 	handle.text = "⠿"
-	handle.theme_type_variation = "Ghost"
 	handle.disabled = not movable
-	handle.focus_mode = Control.FOCUS_NONE
 	handle.tooltip_text = "Drag to move. Hold Ctrl to copy. The ⋯ menu moves blocks from the keyboard." if movable else "This part stays with its block."
 	handle.payload = {"mage_kind": "block", "path": row.doc.path, "snapshot": snapshot, "key": unit.key}
 	bar.add_child(handle)
@@ -238,7 +246,7 @@ func _bar(entry: Dictionary, body: VBoxContainer, icon: String) -> HBoxContainer
 	return bar
 
 func _finish(entry: Dictionary, body: VBoxContainer, bar: HBoxContainer) -> void:
-	var more := _ghost("⋯", "More: edit, duplicate, move, wrap in a condition, remove, explain.")
+	var more := _icon("⋯", "More: edit, duplicate, move, wrap in a condition, remove, explain.")
 	more.pressed.connect(func() -> void: _open_menu(entry, more))
 	bar.add_child(more)
 	if show_line.button_pressed:
@@ -252,6 +260,12 @@ func _ghost(text: String, tooltip: String = "", variation: String = "Ghost") -> 
 	button.tooltip_text = tooltip
 	button.theme_type_variation = variation
 	button.focus_mode = Control.FOCUS_NONE
+	return button
+
+func _icon(text: String, tooltip: String = "") -> IconButton:
+	var button := IconButton.new()
+	button.text = text
+	button.tooltip_text = tooltip
 	return button
 
 func _add_button(text: String, tooltip: String) -> AddButton:
@@ -313,7 +327,7 @@ func _leaf(entry: Dictionary, host: VBoxContainer) -> void:
 			prose.tooltip_text = "Double-click to write here. Coloured words change with the game: a name, a condition, one of several versions."
 			bar.add_child(prose)
 			if writable:
-				var write := _ghost("✎", "Write (or double-click the text)")
+				var write := _icon("✎", "Write (or double-click the text)")
 				write.pressed.connect(func() -> void: _write(entry))
 				bar.add_child(write)
 			_finish(entry, body, bar)
@@ -354,7 +368,7 @@ func _leaf(entry: Dictionary, host: VBoxContainer) -> void:
 				var rest := str(node.target).substr(target.length()).strip_edges()
 				flow.add_child(_plain((rest + ", " if not rest.is_empty() else "") + "then come back", true))
 			if not target.is_empty() and target not in ["back", "end"]:
-				var jump := _ghost("↗", "Open that story")
+				var jump := _icon("↗", "Open that story")
 				jump.pressed.connect(func() -> void: open_requested.emit("scene", target))
 				bar.add_child(jump)
 			_finish(entry, body, bar)
@@ -408,7 +422,7 @@ func _container(entry: Dictionary, host: VBoxContainer, in_fight: bool) -> void:
 	var closed: bool = folded.get(entry.key, false)
 	var icon: String = {"response": "›", "fight": "⚔", "outcome": "⚑"}.get(node.kind, "◇")
 	var bar := _bar(entry, body, icon)
-	var fold := _ghost("▸" if closed else "▾", "Fold or unfold")
+	var fold := _icon("▸" if closed else "▾", "Fold or unfold")
 	fold.pressed.connect(func() -> void:
 		folded[entry.key] = not closed
 		refresh())
@@ -905,6 +919,12 @@ func _block_input(input: InputEvent, entry: Dictionary) -> void:
 		elif command and input.keycode == KEY_ENTER: _write({}, StoryBlocks.after_spot(unit))
 		elif input.keycode == KEY_ENTER and entry.node.kind == "text": _write(entry)
 		elif input.keycode == KEY_ENTER and entry.node.kind == "effect": _edit_action(entry, _inside_fight(entry))
+		elif input.keycode == KEY_MENU or (input.shift_pressed and input.keycode == KEY_F10) or input.keycode == KEY_ENTER: _open_menu(entry, panels[entry.key])
+		elif input.keycode in [KEY_LEFT, KEY_RIGHT] and not StoryBlocks.children(entries, entry.key).is_empty():
+			if bool(folded.get(entry.key, false)) == (input.keycode == KEY_LEFT): return
+			folded[entry.key] = input.keycode == KEY_LEFT
+			focus_line = int(entry.line)
+			refresh()
 		elif input.alt_pressed and input.keycode in [KEY_UP, KEY_DOWN]:
 			var siblings := _siblings(unit)
 			var index := siblings.find(unit)

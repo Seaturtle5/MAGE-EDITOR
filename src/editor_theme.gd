@@ -79,6 +79,11 @@ static func font(file: String) -> Font:
 static func build() -> Theme:
 	var theme := Theme.new()
 	theme.default_font = font("Barlow-Medium.ttf")
+	# A control that holds its text before it joins the window is measured once
+	# with the built-in theme. Its font searches the system's fonts for every
+	# symbol, which makes a long list of blocks slow to build: give it this font.
+	ThemeDB.get_default_theme().default_font = theme.default_font
+	ThemeDB.fallback_font = theme.default_font
 	theme.default_font_size = 16
 	for type in ["Label", "Button", "OptionButton", "MenuButton", "CheckButton", "CheckBox", "LineEdit", "TextEdit", "CodeEdit", "Tree", "ItemList", "PopupMenu", "TabBar", "TabContainer", "SpinBox", "GraphNode", "Window", "TooltipLabel"]:
 		for name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color", "font_selected_color", "font_unselected_color", "font_outline_color"]:

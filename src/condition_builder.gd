@@ -131,7 +131,6 @@ func _row(item: Dictionary, group: Dictionary) -> Control:
 	var row := HBoxContainer.new()
 	var handle := BlockHandle.new()
 	handle.text = "⠿"
-	handle.theme_type_variation = "Ghost"
 	handle.tooltip_text = "Drag into another group"
 	handle.payload = {"mage_kind": "condition", "builder": get_instance_id(), "item": item, "parent": group}
 	row.add_child(handle)
