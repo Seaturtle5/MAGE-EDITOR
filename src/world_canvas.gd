@@ -364,7 +364,8 @@ func refresh() -> void:
 		card.set_slot(0, true, 0, Color("b87d38"), true, 0, Color("b87d38"))
 		for exit: Dictionary in exits_by_place.get(id, []):
 			var exit_label := Label.new()
-			var destination: String = place_names.get(exit.target, exit.text)
+			# A place that is not drawn (another pack's, out of view) is still named.
+			var destination: String = place_names.get(exit.target, workspace.title_of("location", str(exit.target)) if not workspace.title_of("location", str(exit.target)).is_empty() else exit.text)
 			if "door " in str(exit.text) and not str(exit.target).is_empty():
 				destination += " · " + str(exit.text).get_slice("door ", 1).get_slice(",", 0).capitalize()
 			if "one way" in str(exit.text):

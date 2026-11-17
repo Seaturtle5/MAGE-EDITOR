@@ -102,10 +102,11 @@ func _build_amount() -> void:
 	var between := Label.new()
 	between.text = "to"
 	var second := _spin()
-	var formula := LineEdit.new()
-	formula.placeholder_text = "for example player.level * 2"
-	formula.custom_minimum_size.x = 220
-	formula.text_changed.connect(func(_text: String) -> void: edited.emit())
+	var formula := CalcBar.new()
+	formula.workspace = workspace
+	formula.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	formula.changed.connect(func() -> void: edited.emit())
+	mode.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	for child: Control in [mode, first, between, second, formula]: add_child(child)
 	var show := func() -> void:
 		first.visible = mode.selected < 3
@@ -120,7 +121,7 @@ func _build_amount() -> void:
 			0: return str(int(first.value))
 			1: return "%d to %d" % [int(first.value), int(second.value)]
 			2: return str(int(first.value)) + "%"
-			3: return formula.text.strip_edges()
+			3: return formula.text()
 		return ""
 	_write = func(next: String) -> void:
 		var bounds := Effect._range_re.search(next)
@@ -138,24 +139,30 @@ func _build_amount() -> void:
 			first.set_value_no_signal(float(percent.get_string(1)))
 		else:
 			mode.select(3)
-			formula.text = next
+			formula.set_text(next)
 		show.call()
 
 func _build_expression() -> void:
 	var mode := OptionButton.new()
-	for title: String in ["the number", "the counter", "a calculation or text"]: mode.add_item(title)
+	for title: String in ["the number", "the counter", "a calculation", "the text"]: mode.add_item(title)
 	if spec.get("optional", false): mode.add_item("(leave out)")
 	var number := _spin()
 	var counter := _value_picker("value.number")
-	var formula := LineEdit.new()
-	formula.placeholder_text = "for example adam.trust + 1, or \"a text\""
-	formula.custom_minimum_size.x = 220
-	formula.text_changed.connect(func(_text: String) -> void: edited.emit())
-	for child: Control in [mode, number, counter, formula]: add_child(child)
+	var formula := CalcBar.new()
+	formula.workspace = workspace
+	formula.changed.connect(func() -> void: edited.emit())
+	var words := LineEdit.new()
+	words.placeholder_text = "Write the text"
+	words.custom_minimum_size.x = 220
+	words.text_changed.connect(func(_text: String) -> void: edited.emit())
+	formula.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mode.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	for child: Control in [mode, number, counter, formula, words]: add_child(child)
 	var show := func() -> void:
 		number.visible = mode.selected == 0
 		counter.visible = mode.selected == 1
 		formula.visible = mode.selected == 2
+		words.visible = mode.selected == 3
 	mode.item_selected.connect(func(_index: int) -> void:
 		show.call()
 		edited.emit())
@@ -163,19 +170,23 @@ func _build_expression() -> void:
 		match mode.selected:
 			0: return str(int(number.value))
 			1: return counter.value
-			2: return formula.text.strip_edges()
+			2: return formula.text()
+			3: return "\"" + words.text.replace("\"", "'") + "\""
 		return ""
 	_write = func(next: String) -> void:
-		if next.is_empty() and spec.get("optional", false): mode.select(3)
+		if next.is_empty() and spec.get("optional", false): mode.select(4)
 		elif next.is_empty() or next.is_valid_int():
 			mode.select(0)
 			number.set_value_no_signal(float(next) if next.is_valid_int() else 1.0)
 		elif RegEx.create_from_string("^[a-z0-9_]+\\.[a-z0-9_.]+$").search(next) != null:
 			mode.select(1)
 			counter.set_value(next)
+		elif next.length() >= 2 and next.begins_with("\"") and next.ends_with("\"") and next.count("\"") == 2:
+			mode.select(3)
+			words.text = next.substr(1, next.length() - 2)
 		else:
 			mode.select(2)
-			formula.text = next
+			formula.set_text(next)
 		show.call()
 
 func _build_text() -> void:

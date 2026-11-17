@@ -57,6 +57,7 @@ Each block is a sentence. The highlighted parts are chips: choose one to change 
 | Make it conditional | **⋯ → Only if…** puts the block (or all selected blocks) inside a condition. Conditions are built from sentences in groups: all of, any of, none of. Add **Otherwise, if…** and **Otherwise** from the condition's own menu. |
 | Move | Drag the handle; hold Ctrl to copy. Or use **⋯ → Move up / Move down**, Alt+↑ / Alt+↓, or cut and paste. Shift-click and Ctrl-click select several blocks. |
 | Copy between stories | Copy and paste work as lines of the content format, also to and from a text editor. |
+| Work something out | Where a block takes an amount, choose **a calculation** and put it together from chips: **+ number**, **+ counter…**, the signs, brackets and **random**. Choose a chip to change or remove it. |
 | Understand | **⋯ → Explain** says what a block does. **Show the line** shows the content format's line under every block. |
 | Preview | The strip under the blocks shows the text as a sample player reads it. Conditions are marked taken or skipped for that sample. Actions are not applied; the preview stops at responses, pauses, links and fights. |
 
@@ -89,7 +90,7 @@ The game is taken from the engine checkout the editor was started with (`--engin
 ## Not finished
 
 - A creature's variants, a form's lean towards one gender for its offspring, and the rules for importing another game's saves are typed in the format's words in a text box. Every other field has its own control: a picker, number boxes, a switch, chips, a condition in words, rows, or a text box for words the player reads.
-- A calculation is typed as a short formula inside its block; lists of entries are typed with commas.
+- A calculation is built from chips: numbers, counters, plus, minus, times, divided by, brackets and random spans. The smaller or larger of two numbers, a square root and an entry of a list are shown when a calculation holds them, but cannot be added with a button yet.
 - The map does not set travel order, map grids or hand-set map positions; a door that leads into an area is set in the door's details.
 - Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.
 - With very many packs loaded (several thousand pieces of content), the preview under the blocks updates when you ask. A check of your own pack does not look again at the other packs' stories: a problem your change causes in another pack's story shows after **Check**.

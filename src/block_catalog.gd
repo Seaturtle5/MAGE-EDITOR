@@ -113,7 +113,7 @@ const ACTIONS := [
 	["gear.wield", "Items", "Wield {item}", "wield {item:item}", "wield weapon equip"],
 	["unwield", "Items", "Put away the wielded weapon", "unwield", "unwield weapon put away"],
 	["put", "Items", "Leave {item}[ × {count}] lying in {place}", "put {item:item}[ {count:int}] in {place:location}", "put drop leave item place ground"],
-	["remove_from", "Items", "Remove {item} lying in {place}", "remove {item:item} from {place:location}", "remove item from place ground"],
+	["remove_from", "Items", "Remove [{count} of ]{item} lying in {place}", "remove {item:item}[ {count:int}] from {place:location}", "remove item from place ground"],
 	["item_strain", "Items", "{item} now mutates toward {form}", "item {item:item} infects as {form:form}", "item infection strain food mutation"],
 	["cancel_use", "Items", "Keep the item (it is not used up)", "cancel use", "keep item not consumed cancel use", "item_use", "The item stays in the inventory after this use."],
 	# Places and the map.
@@ -170,6 +170,7 @@ const ACTIONS := [
 	["pick", "Body", "Pick a random creature[ tagged {tag}][ {where}][, favoring {favoring}]", "pick random creature[ tagged {tag:word.tag}][ {where:nearby or outside|nearby|anywhere}][ favoring {favoring:ids.creature}]", "pick random creature choose"],
 	["pick.zone", "Body", "Pick a random creature[ tagged {tag}] found in {zone}[, favoring {favoring}]", "pick random creature[ tagged {tag:word.tag}] in {zone:zone}[ favoring {favoring:ids.creature}]", "pick random creature area zone"],
 	["infect", "Body", "Mutate toward {form}[, {times} times][ ({keep})]", "infect {form:form}[ {times:amount} {_s:times|time}][ {keep:?keeping sex}]", "mutate infect transform body form change", "", "One step of gradual change toward a form."],
+	["infect.held", "Body", "Mutate toward the form kept in {value}[, {times} times][ ({keep})]", "infect {value:value.text}[ {times:amount} {_s:times|time}][ {keep:?keeping sex}]", "mutate infect chosen kept form"],
 	["transform", "Body", "Transform completely into {form}", "transform into {form:form}", "transform full body form become"],
 	["transform_part", "Body", "The player's {part} becomes {form}", "transform {part:@part} into {form:form}", "transform part head tail skin body"],
 	["transform_part.held", "Body", "The player's {part} becomes the form named in {value}", "transform {part:@part} into {value:value}", "transform part saved form"],
@@ -193,6 +194,7 @@ const ACTIONS := [
 	# Intimacy and pregnancy.
 	["sex", "Intimacy", "Record sex: {taker} receives {act} from {giver}", "sex {taker:who} receives {act:word.act} from {giver:who}", "sex intimacy virginity partner record", "", "Records the act for virginity, partners and pregnancy chances."],
 	["impregnate", "Pregnancy", "{how}[ ({kind})][ by {father}][ ({eggs})]", "{how:@pregnancy}[ {kind:female|male|self}][ by {father:father}][ {eggs:?with eggs}]", "pregnancy impregnate chance father eggs"],
+	["impregnate.held", "Pregnancy", "{how}[ ({kind})] by the creature kept in {value}[ ({eggs})]", "{how:@pregnancy}[ {kind:female|male|self}] by {value:value.text}[ {eggs:?with eggs}]", "pregnancy impregnate chance father chosen kept"],
 	["pregnancy_step", "Pregnancy", "Pregnancy step: {step}", "{step:accept pregnancy|give birth|record child}", "pregnancy birth child record"],
 	["each_child", "Pregnancy", "For each child[ at {home}], play {scene}", "for each child[ at {home:word.home}] play {scene:script}", "children each play"],
 	["new_child", "Pregnancy", "Start a new story child", "new child", "child new story"],
