@@ -23,6 +23,8 @@ const SPECS := {
 	"pregnancy_rules/extra child bonus": {"left": "When", "left_kind": "condition", "right": "Adds", "right_kind": "word", "add": "+ Add a rule…", "none": "No rules yet."},
 	"pregnancy_rules/child genders": {"left": "Gender", "left_kind": "word", "right": "Weight (and “if …”)", "right_kind": "text", "add": "+ Add a gender", "none": "No genders yet."},
 	"pregnancy_rules/fathers": {"left": "Father (a form or creature)", "left_kind": "word", "right": "When", "right_kind": "text", "add": "+ Add a father", "none": "No fixed fathers."},
+	"save_import/map": {"left": "Column of the file", "left_kind": "word", "right": "Becomes", "right_kind": "text", "add": "+ Add a column", "none": "No columns are taken over."},
+	"save_import/player": {"left": "Column of the file", "left_kind": "word", "right": "Becomes for the player", "right_kind": "text", "add": "+ Add a column", "none": "Nothing special for the player's own row."},
 	"level/options": {"left": "Option", "left_kind": "word", "right": "What it means", "right_kind": "text", "add": "+ Add an option", "none": "No options yet."},
 	"creature/trophies": {"left": "Item", "left_kind": "item", "right": "Chance %", "right_kind": "number", "add": "+ Add a trophy", "none": "No trophies to choose from.", "inline": true},
 }

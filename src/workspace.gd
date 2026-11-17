@@ -202,6 +202,9 @@ func _check_finished(result: Dictionary) -> void:
 	if job.revision == revision and job.base_key == _reference_cache_key:
 		_take(result.found, job.everything, revision)
 		checked.emit()
+	# A check of every pack compiles every line of the game; the engine keeps
+	# them all for reuse, which here is several hundred megabytes for nothing.
+	if job.everything and pack_paths.size() > 1: ContentDB.forget_compiled()
 	if again: request_check(everything)
 
 ## Collects what the other threads have finished. The window calls it every frame.
@@ -314,6 +317,8 @@ static func read_packs(folders: Array, taken_ids: Dictionary, taken_paths: Array
 		out.documents[files[index]] = doc
 		rows.append_array(rows_of(doc, str(out.infos[owners[index]].id), owners[index]))
 	rows.sort_custom(_row_order)
+	# The words each row is found by in the library, ready before the first search.
+	for row: Dictionary in rows: row.find = (Wording.title(row) + " " + str(row.def.id) + " " + Wording.name(row.def.type) + " " + str(row.def.type) + " " + str(row.pack)).to_lower()
 	out.rows = rows
 	return out
 

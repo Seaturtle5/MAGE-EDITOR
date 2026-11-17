@@ -98,14 +98,15 @@ const MESSAGE_FIELDS := {
 const WORD_FIELDS := {
 	"feat": ["group"], "interest": ["group"], "ending": ["type"], "creature": ["special"],
 	"item": ["rest", "icon"], "location": ["rest"], "collection": ["of"], "pack": ["feedback webhook"], "status_bar": ["start date", "sheet"],
-	"event": ["blocks"], "level": ["default", "from"], "heat_rules": ["default"], "filter": ["group", "from"], "tag": ["group", "from"]
+	"event": ["blocks"], "level": ["default", "from"], "heat_rules": ["default"], "filter": ["group", "from"], "tag": ["group", "from"],
+	"save_import": ["file", "rows", "player row", "nowhere", "ignore", "when missing", "map like", "turn stamps"]
 }
 ## A saved value, chosen from the values the packs declare.
 const VALUE_FIELDS := {"meter": ["value"], "combat_rules": ["auto action"]}
 ## Two numbers with something between them: a place on the map ("5, 7"), a grid's size ("12 x 12").
 const POINT_FIELDS := {"location": {"map": [", ", "Across", "Down"]}, "region": {"map grid": [" x ", "Wide", "High"]}}
 ## Lists of short words shown as chips; the value names where suggestions come from.
-const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": "", "outcomes": "", "personalities": "", "genders": "", "meters": "", "menu icons": "", "choices": "", "extra children": "", "currency names": ""}
+const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": "", "outcomes": "", "personalities": "", "genders": "", "meters": "", "menu icons": "", "choices": "", "extra children": "", "currency names": "", "columns": ""}
 
 var workspace: PackWorkspace
 var row: Dictionary = {}
