@@ -21,6 +21,7 @@ A desktop editor for making content packs for [MAGE](https://github.com/Seaturtl
 - [Keys](#keys)
 - [Not finished](#not-finished)
 - [For developers](#for-developers)
+- [License](#license)
 
 ## What it does
 
@@ -235,3 +236,7 @@ Every drag has a menu or a key that does the same.
 The editor is a Godot 4.7 project in statically typed GDScript. `launch.py` stages it in a temporary project together with the content library of the MAGE checkout it is given, so it reads, compiles and checks content with the engine's own code and has no second grammar of its own. It changes pack files as text, within the exact lines an operation is about, so comments, attribution and anything unfamiliar stay as written.
 
 `AGENTS.md` describes the rules the code follows, what each file in `src/` does, how the editor stays fast with a whole game loaded, and how the two themes are built.
+
+## License
+
+MAGE:EDITOR is licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/), like MAGE itself. You may copy and share it unchanged, for non-commercial purposes, as long as you credit it. Selling it or sharing modified versions requires permission. Packs you make with it are your own work and belong to you. See [LICENSE](LICENSE) for the full terms.
