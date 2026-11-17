@@ -441,6 +441,7 @@ func _build_ui() -> void:
 	story_editor.validated.connect(func() -> void:
 		_refresh_diagnostics()
 		_history_changed())
+	story_editor.blocks_chosen.connect(story_canvas.show_blocks)
 	story_canvas.graph.node_selected.connect(func(node: Node) -> void:
 		if story_canvas.graph_rows.has(node.name):
 			story_editor.show_story(workspace, story_canvas.graph_rows[node.name])
@@ -1784,8 +1785,8 @@ func _build_graph_tab() -> void:
 		story_editor.visible = tabs.current_tab == 3
 		_refresh_crumbs())
 	story_canvas.problem.connect(_show_error)
-	story_canvas.block_requested.connect(func(line: int) -> void:
-		if story_editor != null and story_editor.visible: story_editor.focus_source_line(line))
+	story_canvas.block_requested.connect(func(_line: int, keys: Array) -> void:
+		if story_editor != null and story_editor.visible: story_editor.select_blocks(keys))
 	story_canvas.new_story_requested.connect(_new_story_node)
 	story_canvas.next_story_requested.connect(_new_next_story)
 

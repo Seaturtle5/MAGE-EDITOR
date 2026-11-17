@@ -26,7 +26,8 @@ const STARTS := {
 	"locked text": "When the player tries %s while it is locked", "going text": "When the player goes through %s",
 }
 
-## {name, kind, icon, title, line, rows, column, y, height}; a row is {text, muted, tip, port}
+## {name, kind, icon, title, line, keys, rows, column, y, height}; `keys` are the blocks
+## the node stands for (as StoryGraph.structure() names them); a row is {text, muted, tip, port}
 ## where port is absent or says what its way out is: {kind: "next" | "response" | "continuation" | "play", ...}.
 var nodes: Array[Dictionary] = []
 ## {from, port, to} between nodes and {from, port, story} to another story; from "start" is the story's own card.
@@ -77,6 +78,12 @@ func port(name: String, index: int) -> Dictionary:
 		at += 1
 	return {}
 
+## The node that stands for a block, or "" (a block further in than the board draws has none).
+func node_of(key: String) -> String:
+	for entry: Dictionary in nodes:
+		if key in entry.keys: return entry.name
+	return ""
+
 ## The stories this one leads to, by ID.
 func targets() -> Array:
 	var out: Array = []
@@ -85,7 +92,7 @@ func targets() -> Array:
 	return out
 
 func _node(kind: String, icon: String, title: String, line: int, column: int, y: float) -> Dictionary:
-	var entry := {"name": "flow_%d" % nodes.size(), "kind": kind, "icon": icon, "title": title, "line": line, "rows": [], "column": column, "y": y, "height": 0.0}
+	var entry := {"name": "flow_%d" % nodes.size(), "kind": kind, "icon": icon, "title": title, "line": line, "keys": [], "rows": [], "column": column, "y": y, "height": 0.0}
 	nodes.append(entry)
 	_by_name[entry.name] = entry
 	return entry
@@ -117,6 +124,7 @@ func _sequence(parent: String, column: int, y: float, tails: Array, depth: int, 
 			# Too much to draw: the rest of this part is one node that opens in the side editor.
 			var rest := kids.size() - index
 			var more := _node("more", "⋯", "%d more block%s" % [rest, "" if rest == 1 else "s"], int(entry.line), column, y)
+			for at in range(index, kids.size()): more.keys.append(kids[at].key)
 			more.rows.append({"text": "Shown in the blocks on the right", "muted": true, "tip": "This story is long: the board draws its first parts. Click to find these blocks in the side editor.", "port": {"kind": "next"}})
 			_size(more)
 			folded += rest
@@ -148,6 +156,7 @@ func _sequence(parent: String, column: int, y: float, tails: Array, depth: int, 
 				if target not in ["end", "back"]: links.append({"from": tail[0], "port": tail[1], "story": target})
 			if target in ["end", "back"] and not tails.is_empty():
 				var stop := _node("stop", "⏹" if target == "end" else "↩", "Ends here" if target == "end" else "Goes back", int(entry.line), column, y)
+				stop.keys.append(entry.key)
 				stop.rows.append({"text": "The story is over." if target == "end" else "Back to the conversation it came from.", "muted": true, "tip": ""})
 				_size(stop)
 				for tail: Array in tails: links.append({"from": tail[0], "port": tail[1], "to": stop.name})
@@ -182,6 +191,10 @@ func _sequence(parent: String, column: int, y: float, tails: Array, depth: int, 
 					var editable: bool = StoryGraph.transition(part.node).editable
 					made.rows.append({"text": "› " + str(part.node.label) + ("  ◈" if not condition.is_empty() else ""), "tip": "A response the player can choose." + (" Offered only if " + _lower(BlockCatalog.condition_sentence(condition, _workspace)) + "." if not condition.is_empty() else "") + (" Drag its dot to a story to go there." if editable else ""), "port": {"kind": "response", "line": int(part.node.line)} if editable else {"kind": "next"}, "part": part.key})
 				if parts.is_empty(): made.rows.append({"text": "No responses yet", "muted": true, "tip": ""})
+		# The responses are the blocks of a list of responses; a check or a fight is one block.
+		if kind == "choices" and not parts.is_empty():
+			for part: Dictionary in parts: made.keys.append(part.key)
+		else: made.keys.append(entry.key)
 		_size(made)
 		for tail: Array in tails: links.append({"from": tail[0], "port": tail[1], "to": made.name})
 		var outs: Array = []
@@ -215,6 +228,7 @@ func _run(run: Array, column: int, y: float) -> Dictionary:
 	var made := _node("run", "💬" if texts > 0 else "⚙", "Text" if texts > 0 else "Actions", int(run[0].line), column, y)
 	var shown := 0
 	for entry: Dictionary in run:
+		made.keys.append(entry.key)
 		var item: Dictionary = entry.node
 		var line := {"text": "", "tip": "", "line": int(entry.line)}
 		match str(item.kind):

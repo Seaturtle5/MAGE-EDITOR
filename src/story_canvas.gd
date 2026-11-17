@@ -7,8 +7,9 @@ signal problem(message: String)
 signal details_requested(row: Dictionary)
 signal new_story_requested
 signal next_story_requested(row: Dictionary, option: Dictionary)
-## A part of the flow was chosen: the side editor shows the block on that line.
-signal block_requested(line: int)
+## A part of the flow was chosen: the side editor outlines the blocks it stands
+## for (`keys`, none for the story's own card) and shows the first, on `line`.
+signal block_requested(line: int, keys: Array)
 
 var workspace: PackWorkspace
 var graph: GraphEdit
@@ -357,6 +358,7 @@ func _tint(card: GraphNode, kind: String) -> void:
 	var colour := EditorTheme.category_color(FLOW_TINTS.get(kind, "pack"))
 	for state: String in ["titlebar", "titlebar_selected"]:
 		var bar := EditorTheme.box("raised", "accent" if state == "titlebar_selected" else "", 10)
+		if state == "titlebar_selected": bar.set_border_width_all(2)
 		bar.bg_color = EditorTheme.color("raised").lerp(colour, 0.3 if not EditorTheme.light else 0.22)
 		card.add_theme_stylebox_override(state, bar)
 
@@ -468,12 +470,29 @@ func _place_focus() -> void:
 				under.y += tallest + 40.0
 				tallest = 0.0
 
+var _showing := false
+
+## Outlines the part of the flow that stands for the blocks chosen in the side
+## editor, as the side editor outlines the blocks of a chosen part.
+func show_blocks(keys: Array) -> void:
+	if flow == null or not _flow_drawn: return
+	var chosen: Dictionary = {}
+	for key: String in keys:
+		var name := flow.node_of(key)
+		if not name.is_empty(): chosen[name] = true
+	_showing = true
+	for child: Node in graph.get_children():
+		if child is GraphNode: (child as GraphNode).selected = chosen.has(str(child.name))
+	_showing = false
+
 ## A click on the board: a part of the flow is found in the side editor, and
 ## another story's card opens that story.
 func _node_selected(node: Node) -> void:
+	if _showing: return
 	if flow_names.has(node.name):
-		block_requested.emit(int(flow_names[node.name].line))
+		block_requested.emit(int(flow_names[node.name].line), flow_names[node.name].keys)
 		return
+	if _flow_drawn and node.name == focus_card: block_requested.emit(0, [])
 	if not _flow_drawn or node.name == focus_card or not graph_rows.has(node.name): return
 	var card := node as GraphNode
 	var at := card.position_offset

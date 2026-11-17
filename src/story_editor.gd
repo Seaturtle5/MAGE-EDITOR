@@ -8,6 +8,8 @@ signal problem(message: String)
 signal validated
 signal open_requested(type: String, id: String)
 signal try_requested(row: Dictionary)
+## The author chose blocks here: the board outlines the part of the flow they belong to.
+signal blocks_chosen(keys: Array)
 
 const OUTCOMES := {"won": "If the player wins", "lost": "If the player loses", "fled": "If the player flees", "won by seduction": "If the player wins by seduction", "lost by submitting": "If the player gives in"}
 const STORY_NAMES := {"": "Story", "play": "Event story", "talk": "Conversation", "use": "Use story", "encounter": "Encounter", "victory": "If the creature wins", "defeated": "If the creature is defeated", "intro": "Opening", "enter": "On entering", "do": "What happens"}
@@ -1029,6 +1031,7 @@ func _block_input(input: InputEvent, entry: Dictionary) -> void:
 		else: selection = [unit.key]
 		_show_selection()
 		panels[entry.key].grab_focus()
+		blocks_chosen.emit(selection.duplicate())
 	elif input is InputEventKey and input.pressed and not input.echo:
 		var targets := _targets(entry)
 		var command: bool = input.ctrl_pressed or input.meta_pressed
@@ -1089,6 +1092,35 @@ func _reveal(control: Control) -> void:
 	if not is_instance_valid(control) or not control.is_inside_tree() or not block_scroll.is_ancestor_of(control): return
 	block_scroll.ensure_control_visible(control)
 	if control.focus_mode != Control.FOCUS_NONE and control.is_visible_in_tree(): control.grab_focus()
+
+## Outlines the blocks a part of the board's flow stands for and brings the
+## first into view; with no blocks (the story's own card) nothing is outlined
+## and the story is shown from its start.
+func select_blocks(keys: Array) -> void:
+	var opened := false
+	for key: String in keys:
+		var entry := _entry(key)
+		while not entry.is_empty() and not str(entry.parent).is_empty():
+			entry = _entry(str(entry.parent))
+			if folded.get(entry.get("key", ""), false):
+				folded.erase(entry.key)
+				opened = true
+	if opened: refresh()
+	complete()
+	selection.clear()
+	for key: String in keys:
+		if not _entry(key).is_empty(): selection.append(key)
+	_show_selection()
+	if selection.is_empty():
+		block_scroll.scroll_vertical = 0
+		return
+	var first: Control = panels.get(selection[0], null)
+	if first != null: _reveal_from.call_deferred(first)
+
+## Scrolls so a block stands at the top of the list, with what follows it in view.
+func _reveal_from(control: Control) -> void:
+	if not is_instance_valid(control) or not control.is_inside_tree() or not block_scroll.is_ancestor_of(control): return
+	block_scroll.scroll_vertical = int(maxf(0.0, control.get_global_rect().position.y - blocks.get_global_rect().position.y - 6.0))
 
 ## Opens the block that holds a line of this story's file (from a problem or a search).
 func focus_source_line(line: int) -> void:
