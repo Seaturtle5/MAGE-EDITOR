@@ -2,6 +2,9 @@ class_name PackWorkspace
 extends RefCounted
 ## One writable pack, explicitly loaded reference packs, and shared validation.
 
+signal checked
+signal packs_loaded(count: int, refused: Dictionary)
+
 var target := ""
 var pack_paths: Array[String] = []
 var documents: Dictionary = {}
@@ -14,83 +17,401 @@ var preview_revision := -1
 var preview_db: ContentDB
 var history := EditHistory.new()
 var validation_revision := -1
+## The other packs, loaded once: every check and preview loads only the
+## working pack again on top of them (the engine's ContentDB.layer()).
+var _base: ContentDB
+var _base_key := "-"
+## Problems a check of every pack found in the other packs' stories. A check
+## of the working pack alone keeps them until every pack is checked again.
+var _other_problems: Array = []
 
-func validate_buffers() -> void:
-	# The same loader operations as preview_content retain original paths.
-	# Assets remain read-only at their pack paths; only text buffers are loaded.
-	preview_revision = -1
-	db = preview_content()
-	Validator.run(db)
-	diagnostics = db.diagnostics.duplicate(true)
-	for folder: String in pack_paths:
-		if manifest(folder).is_empty(): diagnostics.append({"severity": "error", "path": folder.path_join("pack.fsc"), "line": 1, "message": "The manifest must contain exactly one pack definition."})
-	validation_revision = revision
+# ------------------------------------------------------------ loaded content
 
-func preview_content() -> ContentDB:
-	if preview_db != null and preview_revision == revision:
-		return preview_db
-	preview_db = ContentDB.new()
+## id -> {id, requires, path, manifest} of every loaded pack.
+func _found() -> Dictionary:
 	var found: Dictionary = {}
 	for folder: String in pack_paths:
 		var info := manifest(folder)
-		if not info.is_empty():
-			found[info.id] = info
+		if not info.is_empty(): found[info.id] = info
+	return found
+
+## folder -> its files in order, for the packs that can (or cannot) be changed.
+func _files_by_pack(writable: bool) -> Dictionary:
+	var by_pack: Dictionary = {}
 	var paths: Array = documents.keys()
 	paths.sort()
-	var by_pack: Dictionary = {}
 	for path: String in paths:
+		if documents[path].writable != writable: continue
 		var folder := owner(path)
 		if not by_pack.has(folder): by_pack[folder] = []
 		by_pack[folder].append(path)
-	# The loader folds an extension into the definition it extends, in place,
-	# and lets later extensions add to the fields of earlier ones. Both kinds
-	# go to it as copies, so the editor's own definitions stay as written.
-	var extended: Dictionary = {}
+	return by_pack
+
+## Hands a pack's parsed files to the engine's loader, as the game reads a pack folder.
+static func _add_pack(content: ContentDB, folder: String, paths: Array, results: Dictionary, texts: Dictionary = {}) -> void:
 	for path: String in paths:
-		for definition: FscParser.Definition in documents[path].definitions():
-			if definition.mode == "extend": extended[definition.type + ":" + definition.id] = true
-	for id: String in preview_db._load_order(found):
-		for path: String in by_pack.get(found[id].path, []):
-			var result: FscParser.Result = documents[path].parsed()
-			if result.definitions.any(func(definition: FscParser.Definition) -> bool: return definition.mode == "extend" or extended.has(definition.type + ":" + definition.id)):
-				var copy := FscParser.Result.new()
-				copy.path = result.path
-				copy.diagnostics = result.diagnostics.duplicate(true)
-				for definition: FscParser.Definition in result.definitions:
-					copy.definitions.append(_clone(definition) if definition.mode == "extend" or extended.has(definition.type + ":" + definition.id) else definition)
-				result = copy
-			preview_db._parse_results.append(result)
-			for definition: FscParser.Definition in result.definitions:
-				if definition.type == "pack":
-					preview_db.packs.append({"id": definition.id, "path": found[id].path, "def": definition})
-				preview_db._add(definition, result)
-	preview_db._finish()
+		var result: FscParser.Result = results[path]
+		if texts.has(path) and "// UNCONVERTED:" in str(texts[path]): content._check_unconverted(texts[path], path)
+		content.diagnostics.append_array(result.diagnostics.duplicate(true))
+		content._parse_results.append(result)
+		for definition: FscParser.Definition in result.definitions:
+			if definition.type == "pack":
+				content.packs.append({"id": definition.id, "path": folder, "def": definition, "folder": 0, "art": definition.fields["art"].value if definition.fields.has("art") else ""})
+			content._add(definition, result)
+
+## The other packs as the game loads them, each after the packs it needs,
+## without the working pack. The engine copies a definition before an
+## extension adds to it, so the editor's parsed definitions stay as written.
+static func build_base(found: Dictionary, target_id: String, by_pack: Dictionary, results: Dictionary) -> ContentDB:
+	var content := ContentDB.new()
+	content.protect_definitions = true
+	for id: String in content._load_order(found):
+		if id != target_id: _add_pack(content, found[id].path, by_pack.get(found[id].path, []), results)
+	content._finish()
+	return content
+
+func _results(writable: bool) -> Dictionary:
+	var results: Dictionary = {}
+	for path: String in documents:
+		if documents[path].writable == writable: results[path] = documents[path].parsed()
+	return results
+
+func base_content() -> ContentDB:
+	if _base == null or _base_key != _reference_cache_key:
+		var timing := Perf.start()
+		_base = build_base(_found(), str(manifest(target).get("id", "")), _files_by_pack(false), _results(false))
+		_base_key = _reference_cache_key
+		_other_problems.clear()
+		Perf.stop("workspace: the other packs' content", timing)
+	return _base
+
+## The loaded content with unsaved changes: the working pack over the others.
+func _working_content(base: ContentDB, paths: Array, results: Dictionary, texts: Dictionary) -> ContentDB:
+	var content := base.layer()
+	_add_pack(content, target, paths, results, texts)
+	content._finish()
+	return content
+
+## What the game would load, unsaved changes included. Worked out again
+## after a change, from the working pack alone.
+func preview_content() -> ContentDB:
+	if preview_db != null and preview_revision == revision:
+		return preview_db
+	var timing := Perf.start()
+	var texts: Dictionary = {}
+	var paths: Array = _files_by_pack(true).get(target, [])
+	for path: String in paths: texts[path] = documents[path].text
+	preview_db = _working_content(base_content(), paths, _results(true), texts)
 	preview_revision = revision
+	Perf.stop("workspace: content for pickers and preview", timing)
 	return preview_db
 
+# -------------------------------------------------------------------- checks
 
-## A copy of a parsed definition whose fields and lists can be added to
-## without touching the original. Lines are shared: nothing rewrites them.
-static func _clone(definition: FscParser.Definition) -> FscParser.Definition:
-	var copy := FscParser.Definition.new()
-	copy.type = definition.type
-	copy.id = definition.id
-	copy.mode = definition.mode
-	copy.path = definition.path
-	copy.line = definition.line
-	copy.field_order = definition.field_order.duplicate()
-	copy.options = definition.options.duplicate(true)
-	copy.nodes = definition.nodes.duplicate(true)
-	copy.body = definition.body.duplicate()
-	for name: String in definition.fields:
-		var field: FscParser.Field = definition.fields[name]
-		var twin := FscParser.Field.new()
-		twin.name = field.name
-		twin.value = field.value
-		twin.line = field.line
-		twin.children = field.children.duplicate()
-		copy.fields[name] = twin
-	return copy
+## Takes a finished check's problems: all of them, or the working pack's with
+## what the last check of every pack found in the others' stories.
+func _take(found: Array, everything: bool, at_revision: int) -> void:
+	var fresh: Array = found.duplicate(true)
+	for folder: String in pack_paths:
+		if manifest(folder).is_empty(): fresh.append({"severity": "error", "path": folder.path_join("pack.fsc"), "line": 1, "message": "The manifest must contain exactly one pack definition."})
+	if everything:
+		_other_problems = fresh.filter(func(item: Dictionary) -> bool: return not str(item.path).begins_with(target + "/"))
+	else:
+		var seen: Dictionary = {}
+		for item: Dictionary in fresh: seen[str(item.path) + ":" + str(int(item.line)) + ":" + str(item.message)] = true
+		for item: Dictionary in _other_problems:
+			if not seen.has(str(item.path) + ":" + str(int(item.line)) + ":" + str(item.message)): fresh.append(item)
+	diagnostics = fresh
+	diagnostics_revision += 1
+	validation_revision = at_revision
+	for path: String in documents:
+		if documents[path].writable: _seen_versions[path] = documents[path].version
+
+## Checks the working pack against the loaded packs with the engine's
+## validator, unsaved changes included. With `everything`, the other packs'
+## stories are checked again too (slow with many packs).
+func validate_buffers(everything: bool = false) -> void:
+	preview_revision = -1
+	db = preview_content()
+	Validator.run(db, [] if everything or pack_paths.size() < 2 else [target])
+	_take(db.diagnostics, everything or pack_paths.size() < 2, revision)
+
+# ----- the same check on another thread, for the window
+
+var _check_thread: Thread
+var _check_result: Dictionary = {}
+var _check_again := false
+var _check_again_everything := false
+var _thread_parses: Dictionary = {}
+var checking := false
+var checking_everything := false
+
+## Starts a check that does not hold up the window; `checked` is emitted when
+## its result is in (see poll()). A change made meanwhile starts it again.
+func request_check(everything: bool = false) -> void:
+	if target.is_empty(): return
+	if _check_thread != null or _load_thread != null:
+		_check_again = true
+		_check_again_everything = _check_again_everything or everything
+		return
+	var job := {"revision": revision, "everything": everything or pack_paths.size() < 2, "target": target, "texts": {}, "versions": {}, "paths": _files_by_pack(true).get(target, []), "base": _base if _base_key == _reference_cache_key else null, "base_key": _reference_cache_key}
+	for path: String in job.paths:
+		job.texts[path] = documents[path].text
+		job.versions[path] = documents[path].version
+	if job.base == null:
+		job.found = _found()
+		job.target_id = str(manifest(target).get("id", ""))
+		job.by_pack = _files_by_pack(false)
+		job.results = _results(false)
+	checking = true
+	checking_everything = job.everything
+	_check_thread = Thread.new()
+	_check_thread.start(_check_job.bind(job))
+
+func _check_job(job: Dictionary) -> void:
+	# This thread parses the working pack for itself: the window's own parse
+	# moves with every edit.
+	var results: Dictionary = {}
+	for path: String in job.paths:
+		var kept: Array = _thread_parses.get(path, [])
+		if kept.is_empty() or kept[0] != job.texts[path]:
+			kept = [job.texts[path], FscParser.parse(job.texts[path], path)]
+			_thread_parses[path] = kept
+		results[path] = kept[1]
+	for path: String in _thread_parses.keys():
+		if not results.has(path): _thread_parses.erase(path)
+	var base: ContentDB = job.base
+	if base == null: base = build_base(job.found, job.target_id, job.by_pack, job.results)
+	var content := base.layer()
+	_add_pack(content, job.target, job.paths, results, job.texts)
+	content._finish()
+	Validator.run(content, [] if job.everything else [job.target])
+	_check_result = {"job": job, "found": content.diagnostics, "base": base}
+
+func _check_finished(result: Dictionary) -> void:
+	var job: Dictionary = result.job
+	checking = false
+	if job.target != target: return
+	if job.base == null and job.base_key == _reference_cache_key and (_base == null or _base_key != _reference_cache_key):
+		_base = result.base
+		_base_key = job.base_key
+	var again: bool = _check_again or job.revision != revision
+	var everything: bool = _check_again_everything or (job.everything and job.revision != revision and pack_paths.size() >= 2)
+	_check_again = false
+	_check_again_everything = false
+	if job.revision == revision and job.base_key == _reference_cache_key:
+		_take(result.found, job.everything, revision)
+		checked.emit()
+	if again: request_check(everything)
+
+## Collects what the other threads have finished. The window calls it every frame.
+func poll() -> void:
+	if _load_thread != null and not _load_thread.is_alive():
+		_load_thread.wait_to_finish()
+		_load_thread = null
+		var result := _load_result
+		_load_result = {}
+		_load_finished(result)
+	if _check_thread != null and not _check_thread.is_alive():
+		_check_thread.wait_to_finish()
+		_check_thread = null
+		var result := _check_result
+		_check_result = {}
+		_check_finished(result)
+
+## Waits for the work on other threads to end and takes its results (tests, closing the window).
+func settle() -> void:
+	while _check_thread != null or _load_thread != null:
+		OS.delay_msec(2)
+		poll()
+
+# ----- loading other packs
+
+var _load_thread: Thread
+var _load_result: Dictionary = {}
+var loading := false
+var loading_count := 0
+
+## The packs in the folder beside the working pack that belong with it: the
+## packs it needs, the packs that need it, and the packs that need a pack it
+## needs too (the other packs of the same game).
+func packs_beside() -> Array:
+	var out: Array = []
+	var mine := manifest(target)
+	if mine.is_empty(): return out
+	var parent := target.get_base_dir()
+	var infos: Dictionary = {mine.id: mine}
+	for folder: String in pack_paths:
+		var info := manifest(folder)
+		if not info.is_empty(): infos[info.id] = info
+	var candidates: Dictionary = {}
+	for name: String in DirAccess.get_directories_at(parent):
+		var folder := parent.path_join(name)
+		if folder == target or folder in pack_paths or name.begins_with("."): continue
+		var info := manifest(folder)
+		if info.is_empty() or infos.has(info.id): continue
+		infos[info.id] = info
+		candidates[info.id] = folder
+	var needs := func(id: String) -> Dictionary:
+		var seen: Dictionary = {}
+		var queue: Array = [id]
+		while not queue.is_empty():
+			var next: String = queue.pop_back()
+			for other: String in infos.get(next, {}).get("requires", []):
+				if not seen.has(other):
+					seen[other] = true
+					queue.append(other)
+		return seen
+	var wanted: Dictionary = needs.call(mine.id)
+	for id: String in candidates:
+		var theirs: Dictionary = needs.call(id)
+		var shared: bool = wanted.has(id) or theirs.has(mine.id)
+		for other: String in theirs:
+			if wanted.has(other): shared = true
+		if shared: out.append(candidates[id])
+	out.sort()
+	return out
+
+## Reads pack folders: their files, parsed on every processor at once, and
+## the rows of their definitions in order. Touches nothing of the workspace,
+## so it can run on another thread.
+static func read_packs(folders: Array, taken_ids: Dictionary, taken_paths: Array) -> Dictionary:
+	var out := {"accepted": [], "refused": {}, "documents": {}, "rows": [], "infos": {}}
+	var ids := taken_ids.duplicate()
+	var paths: Array = taken_paths.duplicate()
+	var files: Array[String] = []
+	var owners: Array[String] = []
+	for raw: String in folders:
+		var folder := raw.simplify_path().trim_suffix("/")
+		if folder in paths: continue
+		var info := read_manifest(folder)
+		if info.is_empty(): out.refused[folder] = "It has no valid pack.fsc."
+		elif ids.has(info.id): out.refused[folder] = "A pack with the ID %s is already loaded." % info.id
+		elif paths.any(func(path: String) -> bool: return folder.begins_with(path + "/") or path.begins_with(folder + "/")): out.refused[folder] = "It must be separate from the packs already loaded."
+		else:
+			ids[info.id] = true
+			paths.append(folder)
+			out.accepted.append(folder)
+			out.infos[folder] = info
+			var found: Array[String] = []
+			_list_files(folder, found)
+			for path: String in found:
+				files.append(path)
+				owners.append(folder)
+	var texts: Array[String] = []
+	for path: String in files: texts.append(FileAccess.get_file_as_string(path))
+	var results: Array = []
+	results.resize(files.size())
+	if files.size() > 8:
+		var task := WorkerThreadPool.add_group_task(func(index: int) -> void: results[index] = FscParser.parse(texts[index], files[index]), files.size(), -1, false, "Reading packs")
+		WorkerThreadPool.wait_for_group_task_completion(task)
+	else:
+		for index in files.size(): results[index] = FscParser.parse(texts[index], files[index])
+	var rows: Array[Dictionary] = []
+	for index in files.size():
+		var doc := PackDocument.new(files[index], false, texts[index])
+		doc.adopt(results[index])
+		out.documents[files[index]] = doc
+		rows.append_array(rows_of(doc, str(out.infos[owners[index]].id), owners[index]))
+	rows.sort_custom(_row_order)
+	out.rows = rows
+	return out
+
+static func _list_files(folder: String, out: Array[String]) -> void:
+	var dir := DirAccess.open(folder)
+	if dir == null: return
+	var files := dir.get_files()
+	files.sort()
+	for name in files:
+		if name.ends_with(".fsc") and not dir.is_link(name): out.append(folder.path_join(name))
+	var children := dir.get_directories()
+	children.sort()
+	for name in children:
+		if not name.begins_with(".") and not dir.is_link(name): _list_files(folder.path_join(name), out)
+
+## A pack's ID and the packs it needs, read from its folder.
+static func read_manifest(folder: String) -> Dictionary:
+	var path := folder.path_join("pack.fsc")
+	var directory := DirAccess.open(folder)
+	if directory == null or directory.is_link("pack.fsc") or not FileAccess.file_exists(path): return {}
+	return _manifest_of(FscParser.parse(FileAccess.get_file_as_string(path), path), folder)
+
+static func _manifest_of(parsed: FscParser.Result, folder: String) -> Dictionary:
+	# Like the game: the file names one pack; it may hold other definitions too.
+	var named := parsed.definitions.filter(func(candidate: FscParser.Definition) -> bool: return candidate.type == "pack")
+	if named.size() != 1: return {}
+	var definition: FscParser.Definition = named[0]
+	var requires: Array = []
+	if definition.fields.has("requires"):
+		for part in definition.fields["requires"].value.split(","):
+			if not part.strip_edges().is_empty() and part.strip_edges() != "(none)":
+				requires.append(part.strip_edges())
+	return {"id": definition.id, "requires": requires, "path": folder, "manifest": folder.path_join("pack.fsc")}
+
+## Takes what read_packs() brought into the workspace.
+func _adopt(read: Dictionary) -> void:
+	var first: bool = _reference_rows.is_empty() and pack_paths.size() == 1
+	for folder: String in read.accepted: pack_paths.append(folder)
+	documents.merge(read.documents)
+	if first:
+		# Nothing but the working pack was loaded: the rows are ready as read.
+		_reference_rows = read.rows
+		_reference_keys.clear()
+		_reference_index.clear()
+		for row: Dictionary in _reference_rows:
+			_reference_keys.append(row.sort)
+			_reference_index[row_key(row.doc.path, row.def.type, row.def.id, row.def.mode, row.ordinal)] = row
+		_reference_cache_key = "|".join(pack_paths) + "|" + str(documents.size())
+	_base = read.get("base", null)
+	_base_key = _reference_cache_key if _base != null and first else "-"
+	_other_problems.clear()
+	reindex()
+
+## Loads other packs to use their content without holding up the window;
+## `packs_loaded` is emitted when they are in (see poll()).
+func load_packs(folders: Array) -> void:
+	if target.is_empty() or folders.is_empty() or _load_thread != null: return
+	var ids: Dictionary = {}
+	for path: String in pack_paths: ids[manifest(path).get("id", "")] = true
+	var job := {"folders": folders, "ids": ids, "paths": pack_paths.duplicate(), "target": target, "found": _found(), "target_id": str(manifest(target).get("id", "")), "by_pack": _files_by_pack(false), "results": _results(false)}
+	loading = true
+	loading_count = folders.size()
+	_load_thread = Thread.new()
+	_load_thread.start(_load_job.bind(job))
+
+func _load_job(job: Dictionary) -> void:
+	var read := read_packs(job.folders, job.ids, job.paths)
+	# The other packs' content, ready for the first check and the pickers.
+	var found: Dictionary = job.found.duplicate()
+	var by_pack: Dictionary = job.by_pack.duplicate()
+	var results: Dictionary = job.results.duplicate()
+	for folder: String in read.accepted:
+		found[read.infos[folder].id] = read.infos[folder]
+		by_pack[folder] = []
+	var paths: Array = read.documents.keys()
+	paths.sort()
+	for path: String in paths:
+		results[path] = read.documents[path].parsed()
+		for folder: String in read.accepted:
+			if path.begins_with(folder + "/"):
+				by_pack[folder].append(path)
+				break
+	read.base = build_base(found, job.target_id, by_pack, results)
+	read.job = job
+	_load_result = read
+
+func _load_finished(read: Dictionary) -> void:
+	loading = false
+	if read.job.target != target: return
+	var before := _reference_rows.is_empty() and pack_paths.size() == 1
+	if not before: read.erase("base")
+	_adopt(read)
+	packs_loaded.emit(read.accepted.size(), read.refused)
+	if _check_again:
+		var everything := _check_again_everything
+		_check_again = false
+		_check_again_everything = false
+		request_check(everything)
 
 static func types() -> Array:
 	var out: Array = ContentDB.SCHEMA.keys() + ContentDB.PENDING_TYPES
@@ -98,19 +419,37 @@ static func types() -> Array:
 	return out
 
 
+## Packs up to this size are checked in full, at once, when opened and after each change.
+const LIGHT := 400
+
 func open_pack(folder: String) -> String:
-	var info := manifest(folder)
+	var info := read_manifest(folder)
 	if info.is_empty():
 		return "Choose a folder containing one valid pack definition in pack.fsc."
+	settle()
 	target = folder.simplify_path().trim_suffix("/")
 	pack_paths.assign([target])
 	documents.clear()
+	_manifests.clear()
+	_reference_rows.clear()
+	_reference_keys.clear()
+	_reference_index.clear()
+	_reference_cache_key = ""
+	_own_rows.clear()
+	_checks.clear()
+	_seen_versions.clear()
+	_other_problems.clear()
+	_base = null
+	_base_key = "-"
+	preview_db = null
+	diagnostics = []
 	history.applying = true
 	_scan(target, true)
 	reindex()
 	history.applying = false
 	history.reset(documents)
-	validate()
+	if rows.size() <= LIGHT: validate()
+	else: check_working()
 	return ""
 
 
@@ -120,157 +459,212 @@ func add_reference(folder: String) -> String:
 		return "Open a working pack first."
 	if folder in pack_paths:
 		return "This pack is already loaded."
-	var info := manifest(folder)
-	if info.is_empty():
-		return "Choose a folder with a valid pack.fsc."
-	for path in pack_paths:
-		if manifest(path).id == info.id:
-			return "A pack with this ID is already loaded: " + info.id
-	# Parent/child packs would make ownership ambiguous.
-	for path in pack_paths:
-		if folder.begins_with(path + "/") or path.begins_with(folder + "/"):
-			return "A reference pack must be separate from the working pack."
-	pack_paths.append(folder)
-	_scan(folder, false)
-	reindex()
-	if heavy(): check_working()
-	else: validate()
-	return ""
+	var refused := add_references([folder])
+	return str(refused.get(folder, "")).replace("It has no valid pack.fsc.", "Choose a folder with a valid pack.fsc.").replace("It must be separate from the packs already loaded.", "A reference pack must be separate from the working pack.")
 
 
 ## Adds several packs to use their content, with one check at the end.
 ## Returns the folders that could not be added, with the reason.
 func add_references(folders: Array) -> Dictionary:
-	var refused: Dictionary = {}
 	if target.is_empty(): return {"": "Open a working pack first."}
+	settle()
 	var ids: Dictionary = {}
 	for path: String in pack_paths: ids[manifest(path).get("id", "")] = true
-	for raw: String in folders:
-		var folder := raw.simplify_path().trim_suffix("/")
-		var info := manifest(folder)
-		if folder in pack_paths: continue
-		if info.is_empty(): refused[folder] = "It has no valid pack.fsc."
-		elif ids.has(info.id): refused[folder] = "A pack with the ID %s is already loaded." % info.id
-		elif pack_paths.any(func(path: String) -> bool: return folder.begins_with(path + "/") or path.begins_with(folder + "/")): refused[folder] = "It must be separate from the packs already loaded."
-		else:
-			ids[info.id] = true
-			pack_paths.append(folder)
-			_scan(folder, false)
-	reindex()
+	var read := read_packs(folders, ids, pack_paths)
+	_adopt(read)
 	if heavy(): check_working()
 	else: validate()
-	return refused
+	return read.refused
+
+var _manifests: Dictionary = {}
 
 func manifest(folder: String) -> Dictionary:
 	var path := folder.path_join("pack.fsc")
-	var directory := DirAccess.open(folder)
-	if directory == null or directory.is_link("pack.fsc"):
-		return {}
-	if not FileAccess.file_exists(path):
-		return {}
-	var contents: String = documents[path].text if documents.has(path) else FileAccess.get_file_as_string(path)
-	var parsed := FscParser.parse(contents, path)
-	# Like the game: the file names one pack; it may hold other definitions too.
-	var named := parsed.definitions.filter(func(candidate: FscParser.Definition) -> bool: return candidate.type == "pack")
-	if named.size() != 1:
-		return {}
-	var definition: FscParser.Definition = named[0]
-	var requires: Array = []
-	if definition.fields.has("requires"):
-		for part in definition.fields["requires"].value.split(","):
-			if not part.strip_edges().is_empty() and part.strip_edges() != "(none)":
-				requires.append(part.strip_edges())
-	return {"id": definition.id, "requires": requires, "path": folder, "manifest": path}
+	# A loaded pack's manifest is read again only when its text changed.
+	if documents.has(path):
+		if _manifests.has(path) and _manifests[path].version == documents[path].version: return _manifests[path].info
+		var directory := DirAccess.open(folder)
+		var info: Dictionary = {} if directory == null or directory.is_link("pack.fsc") else _manifest_of(documents[path].parsed(), folder)
+		_manifests[path] = {"version": documents[path].version, "info": info}
+		return info
+	return read_manifest(folder)
 
 
 func _scan(folder: String, writable: bool) -> void:
-	var dir := DirAccess.open(folder)
-	if dir == null:
-		return
-	var files := dir.get_files()
-	files.sort()
-	for name in files:
-		if name.ends_with(".fsc") and not dir.is_link(name):
-			var path := folder.path_join(name)
-			documents[path] = PackDocument.new(path, writable)
-	var children := dir.get_directories()
-	children.sort()
-	for name in children:
-		if not name.begins_with(".") and not dir.is_link(name):
-			_scan(folder.path_join(name), writable)
+	var files: Array[String] = []
+	_list_files(folder, files)
+	for path: String in files: documents[path] = PackDocument.new(path, writable)
 
 
 ## More content than this is checked in full only when asked, and its
 ## preview is refreshed on request: a full check of every pack takes seconds.
 const HEAVY := 4000
-var _reference_cache: Array = []
+var _reference_rows: Array[Dictionary] = []
+var _reference_keys: Array[String] = []
+var _reference_index: Dictionary = {}
 var _reference_cache_key := ""
+var _own_rows: Dictionary = {}
+var _own_index: Dictionary = {}
+var _own_names: PackedStringArray = []
+var _own_places: Array[int] = []
+var _rows_key := "-"
 
 func heavy() -> bool:
 	return rows.size() > HEAVY
 
-static func _row_order(a: Array, b: Array) -> bool:
-	return str(a[0]).naturalnocasecmp_to(str(b[0])) < 0
+static func _key_order(a: String, b: String) -> bool:
+	return a.naturalnocasecmp_to(b) < 0
 
-## [sort key, definition, document, pack id, pack folder, ordinal] for each definition of a file.
-func _entries_of(path: String, pack_ids: Dictionary) -> Array:
-	var doc: PackDocument = documents[path]
+static func _row_order(a: Dictionary, b: Dictionary) -> bool:
+	return str(a.sort).naturalnocasecmp_to(str(b.sort)) < 0
+
+static func row_key(path: String, type: String, id: String, mode: String, ordinal: int) -> String:
+	return path + "|" + type + "|" + id + "|" + mode + "|" + str(ordinal)
+
+## A row for each definition of a file: {def, doc, pack, root, ordinal, sort}.
+static func rows_of(doc: PackDocument, pack_id: String, pack: String) -> Array[Dictionary]:
 	var counts: Dictionary = {}
-	var pack := owner(path)
-	var pack_id: String = pack_ids.get(pack, pack.get_file())
-	var out: Array = []
+	var out: Array[Dictionary] = []
 	for definition in doc.definitions():
 		var identity := definition.type + "|" + definition.id + "|" + definition.mode
 		var ordinal: int = counts.get(identity, 0)
 		counts[identity] = ordinal + 1
-		out.append([definition.type + ":" + definition.id + ":" + pack_id, definition, doc, pack_id, pack, ordinal])
+		out.append({"def": definition, "doc": doc, "pack": pack_id, "root": pack, "ordinal": ordinal, "sort": definition.type + ":" + definition.id + ":" + pack_id})
 	return out
 
+func _rows_of(path: String, pack_ids: Dictionary) -> Array[Dictionary]:
+	var pack := owner(path)
+	return rows_of(documents[path], pack_ids.get(pack, pack.get_file()), pack)
+
+## Lists every definition, in one order for the whole workspace. The other
+## packs never change, so their part is worked out once; of the working pack
+## only the files that changed are read again, and rows of the others stay
+## the very same objects.
 func reindex() -> void:
 	var pack_ids: Dictionary = {}
 	for folder: String in pack_paths: pack_ids[folder] = manifest(folder).get("id", folder.get_file())
-	# The other packs never change: their part of the list is worked out once.
 	var key := "|".join(pack_paths) + "|" + str(documents.size())
 	if key != _reference_cache_key:
-		_reference_cache.clear()
+		_reference_rows.clear()
+		_reference_keys.clear()
+		_reference_index.clear()
 		for path: String in documents:
-			if not documents[path].writable: _reference_cache.append_array(_entries_of(path, pack_ids))
-		_reference_cache.sort_custom(_row_order)
+			if not documents[path].writable: _reference_rows.append_array(_rows_of(path, pack_ids))
+		_reference_rows.sort_custom(_row_order)
+		for row: Dictionary in _reference_rows:
+			_reference_keys.append(row.sort)
+			_reference_index[row_key(row.doc.path, row.def.type, row.def.id, row.def.mode, row.ordinal)] = row
 		_reference_cache_key = key
-	var own: Array = []
-	for path: String in documents:
-		if documents[path].writable: own.append_array(_entries_of(path, pack_ids))
-	own.sort_custom(_row_order)
-	rows.clear()
-	var at := 0
-	for entry: Array in _reference_cache:
-		while at < own.size() and _row_order(own[at], entry):
-			rows.append({"def": own[at][1], "doc": own[at][2], "pack": own[at][3], "root": own[at][4], "ordinal": own[at][5]})
-			at += 1
-		rows.append({"def": entry[1], "doc": entry[2], "pack": entry[3], "root": entry[4], "ordinal": entry[5]})
-	while at < own.size():
-		rows.append({"def": own[at][1], "doc": own[at][2], "pack": own[at][3], "root": own[at][4], "ordinal": own[at][5]})
-		at += 1
-	revision += 1
-	history.checkpoint(documents)
-
-## A quick check of the working pack alone: what the parser and the story
-## compiler say. Problems last found in other packs are kept as they were.
-func check_working() -> void:
-	var fresh: Array = diagnostics.filter(func(item: Dictionary) -> bool: return not (documents.has(item.path) and documents[item.path].writable))
+	var own: Array[Dictionary] = []
+	var target_id: String = pack_ids.get(target, "")
+	for path: String in _own_rows.keys():
+		if not documents.has(path) or not is_same(documents[path], _own_rows[path].doc): _own_rows.erase(path)
 	for path: String in documents:
 		var doc: PackDocument = documents[path]
 		if not doc.writable: continue
-		var result := doc.parsed()
-		fresh.append_array(result.diagnostics.duplicate(true))
-		for definition: FscParser.Definition in result.definitions:
-			var scripts: Array = [definition.nodes] if definition.type in ["scene", "text"] else []
-			for field_key: String in definition.fields:
-				if ContentDB.SCHEMA.get(definition.type, {}).get(field_key, "") == "script": scripts.append(StoryGraph.script_nodes({"def": definition, "doc": doc, "script_field": field_key}))
-			for nodes: Array in scripts:
-				for problem: Dictionary in Program.compile(definition.id, nodes, path).errors:
-					fresh.append({"severity": "error", "path": path, "line": problem.line, "message": problem.message})
+		var kept: Dictionary = _own_rows.get(path, {})
+		if kept.is_empty() or kept.version != doc.version or kept.pack != target_id:
+			kept = {"version": doc.version, "pack": target_id, "doc": doc, "rows": _rows_of(path, pack_ids)}
+			_own_rows[path] = kept
+		own.append_array(kept.rows)
+	# The same definitions as before, in the same files: the list keeps its
+	# order and only takes the rows as they are now.
+	var names: PackedStringArray = []
+	var keys: PackedStringArray = []
+	for row: Dictionary in own:
+		var name := row_key(row.doc.path, row.def.type, row.def.id, row.def.mode, row.ordinal)
+		keys.append(name)
+		names.append(name + "|" + str(row.pack))
+	if names == _own_names and _rows_key == _reference_cache_key and not rows.is_empty():
+		for index in own.size(): _own_index[keys[index]] = own[index]
+		for index: int in _own_places:
+			var old: Dictionary = rows[index]
+			rows[index] = _own_index[row_key(old.doc.path, old.def.type, old.def.id, old.def.mode, old.ordinal)]
+		revision += 1
+		history.checkpoint(documents)
+		return
+	_own_names = names
+	_rows_key = _reference_cache_key
+	own.sort_custom(_row_order)
+	_own_index.clear()
+	for row: Dictionary in own: _own_index[row_key(row.doc.path, row.def.type, row.def.id, row.def.mode, row.ordinal)] = row
+	# The working pack's rows go in between the others', each at its place.
+	_own_places.clear()
+	rows.clear()
+	var at := 0
+	for row: Dictionary in own:
+		var before := _reference_keys.bsearch_custom(row.sort, _key_order, true)
+		if before > at:
+			rows.append_array(_reference_rows.slice(at, before))
+			at = before
+		_own_places.append(rows.size())
+		rows.append(row)
+	if at < _reference_rows.size(): rows.append_array(_reference_rows.slice(at) if at > 0 else _reference_rows)
+	revision += 1
+	history.checkpoint(documents)
+
+var _checks: Dictionary = {}
+
+## What the parser and the story compiler say about one file of the working pack.
+func _check_document(doc: PackDocument) -> Array:
+	var kept: Dictionary = _checks.get(doc.path, {})
+	if not kept.is_empty() and kept.version == doc.version and is_same(kept.doc, doc): return kept.found
+	var found: Array = []
+	var result := doc.parsed()
+	found.append_array(result.diagnostics.duplicate(true))
+	for definition: FscParser.Definition in result.definitions:
+		var scripts: Array = [definition.nodes] if definition.type in ["scene", "text"] else []
+		for field_key: String in definition.fields:
+			if ContentDB.SCHEMA.get(definition.type, {}).get(field_key, "") == "script": scripts.append(StoryGraph.script_nodes({"def": definition, "doc": doc, "script_field": field_key}))
+		for nodes: Array in scripts:
+			for problem: Dictionary in Program.compile(definition.id, nodes, doc.path).errors:
+				found.append({"severity": "error", "path": doc.path, "line": problem.line, "message": problem.message})
+	_checks[doc.path] = {"version": doc.version, "doc": doc, "found": found}
+	return found
+
+var _seen_versions: Dictionary = {}
+
+## The check after a change: a small pack in full at once; a larger one, or
+## one with many packs beside it, quickly for what changed, with the full
+## check of the pack following on another thread.
+func check_after_edit() -> void:
+	if rows.size() <= LIGHT: validate()
+	else:
+		check_working()
+		request_check()
+
+## A quick check of the working pack's changed files: what the parser and the
+## story compiler say, at once. What the last check found elsewhere is kept
+## until the next one (see request_check()).
+func check_working() -> void:
+	var changed: Dictionary = {}
+	for path: String in documents:
+		var doc: PackDocument = documents[path]
+		if doc.writable and _seen_versions.get(path, -1) != doc.version: changed[path] = true
+	var gone: bool = diagnostics.any(func(item: Dictionary) -> bool: return str(item.path).begins_with(target + "/") and not documents.has(item.path))
+	if changed.is_empty() and not gone: return
+	var fresh: Array = diagnostics.filter(func(item: Dictionary) -> bool: return not changed.has(item.path) and not (str(item.path).begins_with(target + "/") and not documents.has(item.path)))
+	for path: String in changed:
+		fresh.append_array(_check_document(documents[path]))
+		_seen_versions[path] = documents[path].version
 	diagnostics = fresh
+	diagnostics_revision += 1
+
+## Raised whenever the list of problems is replaced.
+var diagnostics_revision := 0
+var _problem_lines: Dictionary = {}
+var _problem_lines_revision := -1
+
+## The problems at one line of a file, found without going through the whole list.
+func problems_at(path: String, line: int) -> Array:
+	if _problem_lines_revision != diagnostics_revision:
+		_problem_lines.clear()
+		for item: Dictionary in diagnostics:
+			var key := str(item.path) + ":" + str(int(item.line))
+			if not _problem_lines.has(key): _problem_lines[key] = []
+			_problem_lines[key].append(item)
+		_problem_lines_revision = diagnostics_revision
+	return _problem_lines.get(path + ":" + str(line), [])
 
 var _owners: Dictionary = {}
 
@@ -284,17 +678,16 @@ func owner(path: String) -> String:
 
 
 func find_row(path: String, type: String, id: String, mode: String = "define", ordinal: int = 0) -> Dictionary:
-	for row in rows:
-		if row.doc.path == path and row.def.type == type and row.def.id == id and row.def.mode == mode and row.ordinal == ordinal:
-			return row
-	return {}
+	var key := row_key(path, type, id, mode, ordinal)
+	return _own_index.get(key, _reference_index.get(key, {}))
 
 
 func dirty_count() -> int:
 	var count := 0
+	for path: String in _own_rows:
+		if _own_rows[path].doc.dirty(): count += 1
 	for doc: PackDocument in documents.values():
-		if doc.dirty():
-			count += 1
+		if doc.writable and not _own_rows.has(doc.path) and doc.dirty(): count += 1
 	return count
 
 
@@ -386,12 +779,13 @@ static func template(type: String, id: String) -> String:
 			return "name: " + id.capitalize() if schema.has("name") else "// Add fields using the Fields tab."
 
 
-## Checks all loaded packs with the engine's validator, unsaved changes
-## included. Diagnostics carry the files' own paths.
-func validate() -> void:
+## Checks the working pack against the loaded packs with the engine's
+## validator, unsaved changes included; with `everything`, every pack's
+## stories again. Diagnostics carry the files' own paths.
+func validate(everything: bool = false) -> void:
 	if target.is_empty():
 		return
-	validate_buffers()
+	validate_buffers(everything)
 
 
 static func _original_path(path: String, mapping: Dictionary) -> String:
@@ -445,38 +839,164 @@ func mentions(row: Dictionary) -> Array[Dictionary]:
 
 var _link_cache: Array[Dictionary] = []
 var _link_cache_key := ""
+var _own_links: Dictionary = {}
+static var _link_pattern := RegEx.create_from_string("(?m)(?:^[ \\t]*|:[ \\t]*)(?:->|play)[ \\t]+([a-z0-9_.-]+)")
 
-## Where stories lead: [{from, target, line}] for every "-> story" and "play story".
-## The other packs' links are found once; yours after every change.
-func story_links() -> Array[Dictionary]:
-	if _link_cache_key != _reference_cache_key:
-		_link_cache = _links_in(false)
-		_link_cache_key = _reference_cache_key
-	var out: Array[Dictionary] = _links_in(true)
-	out.append_array(_link_cache)
+func _own_link_lists() -> Array:
+	var lists: Array = []
+	for path: String in _own_links.keys():
+		if not _own_rows.has(path): _own_links.erase(path)
+	for path: String in _own_rows:
+		var kept: Dictionary = _own_links.get(path, {})
+		if kept.is_empty() or kept.version != _own_rows[path].version or not is_same(kept.doc, _own_rows[path].doc):
+			var links: Array[Dictionary] = []
+			for row: Dictionary in _own_rows[path].rows:
+				for found: Array in _block_links(row.doc.block(row.def)): links.append({"from": row, "target": found[1], "line": int(row.def.line) + int(found[0])})
+			kept = {"version": _own_rows[path].version, "doc": _own_rows[path].doc, "links": links}
+			_own_links[path] = kept
+		lists.append(kept.links)
+	return lists
+
+var _link_blocks: Dictionary = {}
+static var _line_link := RegEx.create_from_string("(?:^|:\\s*)(?:->|play)\\s+([a-z0-9_.-]+)")
+
+## The links of one definition's block: [[line offset, target]]. Kept per
+## block text, so only a block that changed is read again.
+func _block_links(block: String) -> Array:
+	if _link_blocks.has(block): return _link_blocks[block]
+	var out: Array = []
+	if "->" in block or "play " in block:
+		var lines := block.split("\n")
+		for index in lines.size():
+			var raw := lines[index]
+			if "->" not in raw and "play " not in raw: continue
+			var clean := raw.strip_edges()
+			if clean.begins_with("//"): continue
+			var matched := _line_link.search(clean)
+			if matched != null and matched.get_string(1) not in ["end", "back"]: out.append([index, matched.get_string(1)])
+	if _link_blocks.size() > 60000: _link_blocks.clear()
+	_link_blocks[block] = out
 	return out
 
-func _links_in(writable: bool) -> Array[Dictionary]:
+func _reference_links() -> Array[Dictionary]:
+	if _link_cache_key != _reference_cache_key:
+		_link_cache.clear()
+		for path: String in documents:
+			if not documents[path].writable: _link_cache.append_array(links_in(documents[path], _reference_rows_of(path)))
+		_link_cache_key = _reference_cache_key
+	return _link_cache
+
+## Where stories lead: [{from, target, line}] for every "-> story" and "play story".
+## The other packs' links are found once; yours again for the files that changed.
+func story_links() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	var pattern := RegEx.create_from_string("(?:^|:\\s*)(?:->|play)\\s+([a-z0-9_.-]+)")
-	var documents_rows: Dictionary = {}
-	for row in rows:
-		if row.doc.writable != writable: continue
-		if not documents_rows.has(row.doc.path):
-			documents_rows[row.doc.path] = []
-		documents_rows[row.doc.path].append(row)
-	for path: String in documents_rows:
-		var entries: Array = documents_rows[path]
-		entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.def.line < b.def.line)
-		var lines: PackedStringArray = documents[path].text.split("\n")
-		var index := 0
-		for i in lines.size():
-			var clean := lines[i].strip_edges()
-			if clean.begins_with("//") or ("->" not in clean and "play " not in clean): continue
-			var matched := pattern.search(clean)
-			if matched == null or matched.get_string(1) in ["end", "back"]: continue
-			while index + 1 < entries.size() and int(entries[index + 1].def.line) <= i + 1: index += 1
-			if int(entries[index].def.line) <= i + 1: out.append({"from": entries[index], "target": matched.get_string(1), "line": i + 1})
+	for list: Array in _own_link_lists(): out.append_array(list)
+	out.append_array(_reference_links())
+	return out
+
+var _reference_by_path: Dictionary = {}
+var _reference_by_id: Dictionary = {}
+var _reference_under: Dictionary = {}
+var _reference_by_path_key := ""
+var _reference_touching: Dictionary = {}
+var _reference_touching_key := ""
+
+func _index_references() -> void:
+	if _reference_by_path_key == _reference_cache_key: return
+	_reference_by_path.clear()
+	_reference_by_id.clear()
+	_reference_under.clear()
+	for row: Dictionary in _reference_rows:
+		var path: String = row.doc.path
+		if not _reference_by_path.has(path): _reference_by_path[path] = []
+		_reference_by_path[path].append(row)
+		var id: String = row.def.id
+		if not _reference_by_id.has(id): _reference_by_id[id] = []
+		_reference_by_id[id].append(row)
+		if "." in id:
+			var head := id.get_slice(".", 0)
+			if not _reference_under.has(head): _reference_under[head] = []
+			_reference_under[head].append(row)
+	_reference_by_path_key = _reference_cache_key
+
+func _reference_rows_of(path: String) -> Array:
+	_index_references()
+	return _reference_by_path.get(path, [])
+
+## Every definition with this ID, in any pack and of any type.
+func rows_with_id(id: String) -> Array:
+	_index_references()
+	var out: Array = _own_with_id(id).duplicate()
+	out.append_array(_reference_by_id.get(id, []))
+	return out
+
+var _own_by_id: Dictionary = {}
+var _own_by_id_revision := -1
+
+func _own_with_id(id: String) -> Array:
+	if _own_by_id_revision != revision:
+		_own_by_id.clear()
+		for path: String in _own_rows:
+			for row: Dictionary in _own_rows[path].rows:
+				if _own_by_id.has(row.def.id): _own_by_id[row.def.id].append(row)
+				else: _own_by_id[row.def.id] = [row]
+		_own_by_id_revision = revision
+	return _own_by_id.get(id, [])
+
+## Every definition whose ID starts with "<head>." (a character's own stories, for one).
+func rows_under(head: String) -> Array:
+	_index_references()
+	var out: Array = []
+	for path: String in _own_rows:
+		for row: Dictionary in _own_rows[path].rows:
+			if str(row.def.id).begins_with(head + "."): out.append(row)
+	out.append_array(_reference_under.get(head, []))
+	return out
+
+## The story links that start in or lead to content with this ID.
+func links_touching(id: String) -> Array:
+	if _reference_touching_key != _reference_cache_key:
+		_reference_touching.clear()
+		for link: Dictionary in _reference_links():
+			for key: String in [str(link.from.def.id), str(link.target)]:
+				if not _reference_touching.has(key): _reference_touching[key] = []
+				_reference_touching[key].append(link)
+		_reference_touching_key = _reference_cache_key
+	var out: Array = []
+	for list: Array in _own_link_lists():
+		for link: Dictionary in list:
+			if link.from.def.id == id or link.target == id: out.append(link)
+	out.append_array(_reference_touching.get(id, []))
+	return out
+
+## The links of one file: its text is searched in one go, and each find is
+## given to the definition whose lines hold it. `entries` are the file's rows.
+static func links_in(doc: PackDocument, entries: Array) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var text: String = doc.text
+	if entries.is_empty() or ("->" not in text and "play " not in text): return out
+	entries = entries.duplicate()
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.def.line < b.def.line)
+	var index := 0
+	var line := 1
+	var counted := 0
+	var last_line := 0
+	for matched: RegExMatch in _link_pattern.search_all(text):
+		var at := matched.get_start()
+		line += text.count("\n", counted, at) if at > counted else 0
+		counted = at
+		# The match may begin at the line's start or after "field:"; either way its line is the one that holds the target.
+		var target_at := matched.get_start(1)
+		var target_line := line + (text.count("\n", at, target_at) if target_at > at else 0)
+		if target_line == last_line: continue
+		var begin := text.rfind("\n", target_at) + 1
+		var head := text.substr(begin, mini(target_at - begin, 200)).strip_edges()
+		if head.begins_with("//"): continue
+		var target := matched.get_string(1)
+		if target in ["end", "back"]: continue
+		last_line = target_line
+		while index + 1 < entries.size() and int(entries[index + 1].def.line) <= target_line: index += 1
+		if int(entries[index].def.line) <= target_line: out.append({"from": entries[index], "target": target, "line": target_line})
 	return out
 
 func _inside_working_pack(path: String) -> bool:
@@ -495,6 +1015,7 @@ func _inside_working_pack(path: String) -> bool:
 
 
 func transaction(label: String, operation: Callable) -> String:
+	var timing := Perf.start()
 	var before := history.capture(documents)
 	var previous_baseline := history.baseline
 	history.depth += 1
@@ -508,8 +1029,13 @@ func transaction(label: String, operation: Callable) -> String:
 		reindex()
 		history.applying = false
 		return error
+	Perf.stop("workspace: the change itself", timing)
+	timing = Perf.start()
 	history.checkpoint(documents, label)
+	Perf.stop("workspace: history", timing)
+	timing = Perf.start()
 	reindex()
+	Perf.stop("workspace: reindex", timing)
 	return ""
 
 func undo() -> String:
@@ -643,19 +1169,32 @@ func connect_places(source: Dictionary, destination: Dictionary, direction: Stri
 
 var _titles: Dictionary = {}
 var _titles_revision := -1
+var _reference_titles: Dictionary = {}
+var _reference_titles_key := "-"
+
+static func _collect_titles(from: Array, into: Dictionary) -> void:
+	for row: Dictionary in from:
+		if row.def.mode == "extend" or not row.def.fields.has("name"): continue
+		var title: String = row.def.fields.name.value
+		if title.is_empty(): continue
+		into[row.def.type + ":" + row.def.id] = title
+		if not into.has(":" + row.def.id) or row.def.type == "character": into[":" + row.def.id] = title
 
 ## The name an author sees for content; with an empty type, any type holding the ID.
 func title_of(type: String, id: String) -> String:
+	if _reference_titles_key != _reference_cache_key:
+		_reference_titles.clear()
+		_collect_titles(_reference_rows, _reference_titles)
+		_reference_titles_key = _reference_cache_key
 	if _titles_revision != revision:
 		_titles.clear()
-		for row: Dictionary in rows:
-			if row.def.mode == "extend" or not row.def.fields.has("name"): continue
-			var title: String = row.def.fields.name.value
-			if title.is_empty(): continue
-			_titles[row.def.type + ":" + row.def.id] = title
-			if not _titles.has(":" + row.def.id) or row.def.type == "character": _titles[":" + row.def.id] = title
+		for path: String in _own_rows: _collect_titles(_own_rows[path].rows, _titles)
 		_titles_revision = revision
-	return _titles.get(type + ":" + id, _titles.get(":" + id, "") if type in ["", "who", "holder"] else "")
+	var exact := type + ":" + id
+	if _titles.has(exact): return _titles[exact]
+	if _reference_titles.has(exact): return _reference_titles[exact]
+	if type in ["", "who", "holder"]: return _titles.get(":" + id, _reference_titles.get(":" + id, ""))
+	return ""
 
 ## Adds a named result to an event's outcomes, so stories can record and check it.
 func add_outcome(event: String, name: String) -> String:
@@ -703,14 +1242,10 @@ func declare_value(type: String, id: String, name: String, spec: String) -> Stri
 
 var _words: Dictionary = {}
 var _words_revision := -1
+var _reference_words: Dictionary = {}
+var _reference_words_key := "-"
 
-## Words already used in the loaded packs, to suggest where the engine takes any word.
-func known_words(list: String) -> Array:
-	if BlockCatalog.WORDS.has(list): return BlockCatalog.WORDS[list]
-	if _words_revision != revision:
-		_words.clear()
-		_words_revision = revision
-	if _words.has(list): return _words[list]
+func _words_in(list: String, writable: bool) -> Dictionary:
 	var found: Dictionary = {}
 	var pattern: RegEx = null
 	match list:
@@ -720,7 +1255,11 @@ func known_words(list: String) -> Array:
 		"place_flag": pattern = RegEx.create_from_string("\\bflagged ([a-z][a-z ]*?)(?:\\]|:| and | or |$)")
 		"ending_flag": pattern = RegEx.create_from_string("\\bending flag ([a-z0-9_]+)")
 		"interest": pattern = RegEx.create_from_string("\\binterested in ([a-z_]+)")
-	for row: Dictionary in rows:
+	var source: Array = []
+	if writable:
+		for path: String in _own_rows: source.append_array(_own_rows[path].rows)
+	else: source = _reference_rows
+	for row: Dictionary in source:
 		if list == "tag" and row.def.type in ["tag", "filter"]: found[row.def.id] = true
 		if list == "tag" and row.def.fields.has("tags"):
 			for tag: String in str(row.def.fields.tags.value).split(","):
@@ -730,7 +1269,25 @@ func known_words(list: String) -> Array:
 				if not flag.strip_edges().is_empty(): found[flag.strip_edges()] = true
 	if pattern != null:
 		for path: String in documents:
+			if documents[path].writable != writable: continue
 			for matched: RegExMatch in pattern.search_all(documents[path].text): found[matched.get_string(1)] = true
+	return found
+
+## Words already used in the loaded packs, to suggest where the engine takes any word.
+## The other packs are read once; the working pack again after a change.
+func known_words(list: String) -> Array:
+	if BlockCatalog.WORDS.has(list): return BlockCatalog.WORDS[list]
+	if _reference_words_key != _reference_cache_key:
+		_reference_words.clear()
+		_reference_words_key = _reference_cache_key
+		_words_revision = -1
+	if _words_revision != revision:
+		_words.clear()
+		_words_revision = revision
+	if _words.has(list): return _words[list]
+	if not _reference_words.has(list): _reference_words[list] = _words_in(list, false)
+	var found: Dictionary = _reference_words[list].duplicate()
+	found.merge(_words_in(list, true))
 	if list == "place_flag":
 		for flag: String in Validator.LOCATION_FLAGS: found[flag] = true
 	var result: Array = found.keys()
@@ -740,6 +1297,77 @@ func known_words(list: String) -> Array:
 
 var _uses: Dictionary = {}
 var _uses_revision := -1
+var _use_files: Dictionary = {}
+var _use_blocks: Dictionary = {}
+static var _use_token := RegEx.create_from_string("[a-z0-9_][a-z0-9_-]*")
+
+## Every word of a definition's block that could name content:
+## {lines: [[line offset, text]], words: {word: [indexes into lines]}}.
+## Comments do not count. Kept per block text, so only a block that changed
+## is read again.
+func _block_words(block: String) -> Dictionary:
+	if _use_blocks.has(block): return _use_blocks[block]
+	var out := {"lines": [], "words": {}}
+	var lines := block.split("\n")
+	for index in range(1, lines.size()):
+		var clean := lines[index].strip_edges()
+		if clean.is_empty() or clean.begins_with("//"): continue
+		var code := ContentTools.code_text(lines[index].trim_suffix("\r"))
+		var at: int = out.lines.size()
+		var any := false
+		for matched: RegExMatch in _use_token.search_all(code):
+			# In "adam.trust" only the owner is content; "trust" is its value.
+			if matched.get_start() > 0 and code[matched.get_start() - 1] == ".": continue
+			var word := matched.get_string()
+			if not out.words.has(word): out.words[word] = [at]
+			elif out.words[word][-1] != at: out.words[word].append(at)
+			any = true
+		if any: out.lines.append([index, clean])
+	if _use_blocks.size() > 60000: _use_blocks.clear()
+	_use_blocks[block] = out
+	return out
+
+## word -> the rows of one file of the working pack whose blocks mention it.
+## Kept as positions in the file, and brought up to date only for the blocks
+## that changed.
+func _file_uses(path: String) -> Dictionary:
+	var own: Dictionary = _own_rows.get(path, {})
+	if own.is_empty(): return {}
+	var kept: Dictionary = _use_files.get(path, {})
+	if kept.is_empty() or not is_same(kept.doc, own.doc) or kept.blocks.size() != own.rows.size():
+		kept = {"version": -1, "doc": own.doc, "blocks": [], "places": {}}
+		for row: Dictionary in own.rows: kept.blocks.append("")
+		_use_files[path] = kept
+	if kept.version != own.version:
+		for at in own.rows.size():
+			var row: Dictionary = own.rows[at]
+			var block: String = row.doc.block(row.def)
+			if block == kept.blocks[at]: continue
+			if not str(kept.blocks[at]).is_empty():
+				for word: String in _block_words(kept.blocks[at]).words:
+					if kept.places.has(word): kept.places[word].erase(at)
+			for word: String in _block_words(block).words:
+				if kept.places.has(word): kept.places[word].append(at)
+				else: kept.places[word] = [at]
+			kept.blocks[at] = block
+		kept.version = own.version
+		kept.erase("words")
+	return kept.places
+
+## The rows of one file whose blocks mention a word.
+func _rows_using(path: String, word: String) -> Array:
+	var out: Array = []
+	var rows_here: Array = _own_rows[path].rows
+	for at: int in _file_uses(path).get(word, []): out.append(rows_here[at])
+	return out
+
+## The lines of one definition that mention a word: [{row, line, text}].
+func _uses_in(row: Dictionary, word: String) -> Array:
+	var out: Array = []
+	if word == row.def.id: return out
+	var found: Dictionary = _block_words(row.doc.block(row.def))
+	for at: int in found.words.get(word, []): out.append({"row": row, "line": int(row.def.line) + int(found.lines[at][0]), "text": found.lines[at][1]})
+	return out
 
 ## Where each ID is mentioned in the working pack: id -> [{row, line, text}].
 ## Comments and the content's own block do not count.
@@ -749,33 +1377,37 @@ func uses_index() -> Dictionary:
 	_uses_revision = revision
 	var known: Dictionary = {}
 	for row: Dictionary in rows: known[row.def.id] = true
-	var token := RegEx.create_from_string("[a-z0-9_][a-z0-9_-]*")
-	for row: Dictionary in rows:
-		if not row.doc.writable: continue
-		var lines: PackedStringArray = str(row.doc.block(row.def)).split("\n")
-		for index in range(1, lines.size()):
-			var clean := lines[index].strip_edges()
-			if clean.is_empty() or clean.begins_with("//"): continue
-			var seen: Dictionary = {}
-			var code := ContentTools.code_text(lines[index].trim_suffix("\r"))
-			for matched: RegExMatch in token.search_all(code):
-				var id := matched.get_string()
-				if not known.has(id) or id == row.def.id or seen.has(id): continue
-				# In "adam.trust" only the owner is content; "trust" is its value.
-				if matched.get_start() > 0 and code[matched.get_start() - 1] == ".": continue
-				seen[id] = true
-				if not _uses.has(id): _uses[id] = []
-				_uses[id].append({"row": row, "line": int(row.def.line) + index, "text": clean})
+	for path: String in _own_rows:
+		var words := _file_uses(path)
+		for word: String in words:
+			if not known.has(word): continue
+			for row: Dictionary in _rows_using(path, word):
+				var found := _uses_in(row, word)
+				if found.is_empty(): continue
+				if not _uses.has(word): _uses[word] = []
+				_uses[word].append_array(found)
 	return _uses
 
+## Where one ID is mentioned in the working pack.
 func uses(id: String) -> Array:
-	return uses_index().get(id, [])
+	if _uses_revision == revision: return _uses.get(id, [])
+	var found: Array = []
+	for path: String in _own_rows:
+		for row: Dictionary in _rows_using(path, id): found.append_array(_uses_in(row, id))
+	return found
+
+## Whether anything in the working pack mentions an ID (cheaper than listing where).
+func is_used(id: String) -> bool:
+	for path: String in _own_rows:
+		for row: Dictionary in _rows_using(path, id):
+			if row.def.id != id: return true
+	return false
 
 ## Short notes on what a piece of content still needs, for the home page.
 func hints(row: Dictionary) -> Array[String]:
 	var notes: Array[String] = []
 	var definition: FscParser.Definition = row.def
-	var used := uses(definition.id).size()
+	var used := 1 if is_used(definition.id) else 0
 	match str(definition.type):
 		"scene", "menu":
 			notes.append("✓ written" if not StoryGraph.structure(row).is_empty() else "⚠ nothing written yet")

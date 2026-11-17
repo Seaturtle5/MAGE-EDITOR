@@ -21,7 +21,7 @@ The editor uses the engine's own reader and checker from that checkout, without 
 | Where | What |
 |---|---|
 | Top bar | **Pack** (new, open, add another pack, import a picture), **Undo / Redo**, **Find anything** (Ctrl+K), **Create**, **Play**, the check result, and **Save**. The gear holds appearance, interface size and the technical views. |
-| Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. **Pack → Add another pack** takes one pack or a whole folder of packs. |
+| Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. Opening a pack also loads the packs in the folder beside it that belong with it (see below). **Pack → Add another pack** takes one more pack or a whole folder of packs. |
 | Home | Guided tasks, what you worked on with hints about what it still needs, and problems. |
 | Stories | The board: one card per story, with lines showing how they lead to each other. Select a card to see its blocks in the side editor. **Tidy up** arranges the cards. |
 | Map | Places and the ways between them. Drag from one place to another to connect them, with or without a door. Select a place to set its area (what is found while exploring) and its region, to add a door to a way, and to see what happens there. **Arrange as in the game** lays the places out as the game's own map does. |
@@ -30,6 +30,17 @@ The editor uses the engine's own reader and checker from that checkout, without 
 | Status line | What just happened, with **Undo**, and where you are. |
 
 **‹ ›** beside Home go back and forward through what you looked at (Alt+← / Alt+→). The **☰** button opens the lists of saved values and problems: choose a value to see every story that changes it and every story that reads it.
+
+## Working beside other packs
+
+A pack rarely stands alone: it uses the base pack's items, another author's places. When you open a pack, the editor looks in the folder it sits in and loads the packs that belong with it: the packs it needs, the packs that need it, and the other packs that need the same base pack. With a whole game this can be sixty packs.
+
+- Your own pack opens at once. The others are read behind the scenes, on every processor at once, and the check mark in the top bar says **Loading packs…** until they are in. You can already write.
+- The other packs cannot be changed here. Using something of theirs adds the pack to the ones yours needs.
+- After every change the editor checks the changed file at once (is every line something the game understands?), and then checks your whole pack against the others behind the scenes (does that item exist?); problems appear on their blocks when it is done, usually within a second or two.
+- **Check** in the top bar checks every loaded pack's stories again. With a whole game loaded this takes a quarter of a minute; you can keep working meanwhile.
+
+Without the packs it uses, a pack shows a problem for everything it takes from them. If your packs are not kept side by side, add them with **Pack → Add another pack**.
 
 ## Guided tasks
 
@@ -81,5 +92,6 @@ The game is taken from the engine checkout the editor was started with (`--engin
 - A calculation is typed as a short formula inside its block; lists of entries are typed with commas.
 - The map does not set travel order, map grids or hand-set map positions; a door that leads into an area is set in the door's details.
 - Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.
-- With very many packs loaded (several thousand pieces of content), the full check runs when you choose it and the preview updates when you ask, so that writing stays quick.
+- With very many packs loaded (several thousand pieces of content), the preview under the blocks updates when you ask. A check of your own pack does not look again at the other packs' stories: a problem your change causes in another pack's story shows after **Check**.
+- A board of every story of a large game is not drawn: beyond 150 cards the board shows the first ones and says how many are left out. Choose a story to see it with its neighbours.
 - The Details pages still use an older design than the side editor; conditions of events and reactions of items there are chosen from an older list.

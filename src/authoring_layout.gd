@@ -92,10 +92,15 @@ static func clear(parent: Node) -> void:
 		parent.remove_child(child)
 		child.queue_free()
 
+const WRAP_WIDTH := 420.0
+
 static func label(text: String, size: int = 16, muted: bool = false) -> Label:
 	var result := Label.new()
 	result.text = text
 	result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Wrapped text without a width is first laid out one letter per line,
+	# which is slow for anything long: start it at a likely width.
+	result.size.x = WRAP_WIDTH
 	result.add_theme_font_size_override("font_size", size)
 	if muted: result.theme_type_variation = "MutedLabel"
 	return result

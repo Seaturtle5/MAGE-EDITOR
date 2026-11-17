@@ -5,9 +5,9 @@ extends RefCounted
 static func structure(row: Dictionary) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	if row.is_empty(): return result
-	var lines := _lines(row.doc)
+	var lines: PackedStringArray = row.doc.lines()
 	var span: Vector2i = row.doc.block_range(row.def)
-	var end_line: int = row.doc.text.left(span.y).count("\n") + 2
+	var end_line: int = row.doc.line_at(span.y) + 1
 	if row.has("script_field") or row.def.type not in ["scene", "text", "menu"]:
 		var key: String = row.get("script_field", "play" if row.def.type == "event" else "talk")
 		if row.def.fields.has(key):
@@ -247,8 +247,9 @@ static func _has_nested_goto(node: Dictionary) -> bool:
 				return true
 	return false
 
+## A copy of the document's lines, to change and hand to `_save_lines`.
 static func _lines(doc: PackDocument) -> PackedStringArray:
-	return doc.text.split("\n")
+	return doc.lines().duplicate()
 
 static func _save_lines(doc: PackDocument, lines: PackedStringArray) -> void:
 	doc.change("\n".join(lines))

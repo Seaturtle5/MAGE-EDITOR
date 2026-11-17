@@ -99,13 +99,27 @@ func _ready() -> void:
 	check_timer.one_shot = true
 	check_timer.wait_time = 0.3
 	check_timer.timeout.connect(func() -> void:
-		# With very many packs loaded the full check waits for the Check button.
-		if workspace.heavy(): workspace.check_working()
-		else: workspace.validate_buffers()
+		var before := _problem_mark()
+		workspace.check_after_edit()
 		checked_revision = workspace.revision
-		refresh()
+		if _problem_mark() != before: refresh()
 		validated.emit())
 	add_child(check_timer)
+
+## The problems of the story's file, as text: the blocks are drawn again only when it changes.
+func _problem_mark() -> String:
+	if workspace == null or row.is_empty(): return ""
+	var out: PackedStringArray = []
+	for item: Dictionary in workspace.diagnostics:
+		if item.path == row.doc.path and item.severity == "error": out.append("%d %s" % [int(item.line), item.message])
+	return "\n".join(out)
+
+var _drawn_problems := ""
+
+## The window's check came back: mark the blocks it found problems in.
+func problems_changed() -> void:
+	if workspace == null or row.is_empty() or writer != null: return
+	if _problem_mark() != _drawn_problems: refresh()
 
 func show_story(value: PackWorkspace, selected: Dictionary) -> void:
 	var same: bool = not (row.is_empty() or selected.is_empty() or row.doc.path != selected.doc.path or row.def.id != selected.def.id or row.get("script_field", "") != selected.get("script_field", ""))
@@ -124,10 +138,64 @@ static func story_name(story: Dictionary) -> String:
 	if story.def.type == "menu" and not story.has("script_field"): return "Conversation"
 	return STORY_NAMES.get(key, AuthoringCatalog.INTERACTIONS.get(key, [key.capitalize()])[0])
 
+# Long stories are drawn in two steps: the blocks in view at once, the rest
+# over the next frames, a few milliseconds at a time. A block not drawn yet
+# is an empty slot of the height it had last time.
+var waiting: Array[Dictionary] = []
+var _slots: Array[VBoxContainer] = []
+var _heights: Dictionary = {}
+var _eager_from := 0
+var _eager_to := 0
+var _eager_left := 0
+var _drawn_path := ""
+
+## What a block is made from, as a number: the same lines give the same block.
+func _signature(entry: Dictionary) -> int:
+	return (str(entry.indent) + "\n".join(row.doc.lines().slice(int(entry.line) - 1, int(entry.end_line) - 1))).hash()
+
+## The source lines of the blocks in view now, or (0, 0) when none are drawn.
+func _lines_in_view() -> Vector2i:
+	var view := block_scroll.get_global_rect()
+	var first := 0
+	var last := 0
+	for slot: VBoxContainer in _slots:
+		if not is_instance_valid(slot) or not slot.is_inside_tree(): continue
+		var span: Vector2i = slot.get_meta("lines")
+		if slot.custom_minimum_size.y == 0 and slot.size.y > 0: _heights[slot.get_meta("signature")] = slot.size.y
+		if not view.intersects(slot.get_global_rect()): continue
+		if first == 0 or span.x < first: first = span.x
+		if span.y > last: last = span.y
+	return Vector2i(first, last)
+
+func _process(_delta: float) -> void:
+	if waiting.is_empty():
+		set_process(false)
+		return
+	var began := Time.get_ticks_usec()
+	while not waiting.is_empty() and Time.get_ticks_usec() - began < 5000: _draw_pending(waiting.pop_front())
+	if waiting.is_empty():
+		_show_selection()
+		_show_badges()
+
+func _draw_pending(unit: Dictionary) -> void:
+	var slot: VBoxContainer = unit.slot
+	if not is_instance_valid(slot): return
+	slot.custom_minimum_size.y = 0
+	_block(unit.entry, slot, unit.in_fight)
+
+## Draws every block that is still waiting (before looking one up).
+func complete() -> void:
+	while not waiting.is_empty(): _draw_pending(waiting.pop_front())
+	_eager_left = 0
+
 func refresh() -> void:
 	if blocks == null or workspace == null: return
 	drawn_revision = workspace.revision
 	writer = null
+	var view := _lines_in_view() if not row.is_empty() and _drawn_path == str(row.doc.path) + "#" + str(row.def.id) + "#" + str(row.get("script_field", "")) else Vector2i.ZERO
+	if _heights.size() > 4000: _heights.clear()
+	waiting.clear()
+	_slots.clear()
 	# The list is built away from the window and put in at once: adding
 	# blocks one by one to what is on screen costs far more.
 	var scrolled := block_scroll.scroll_vertical
@@ -141,7 +209,10 @@ func refresh() -> void:
 	entries = []
 	if not row.is_empty():
 		var current := workspace.find_row(row.doc.path, row.def.type, row.def.id, row.def.mode, row.get("ordinal", 0))
-		if not current.is_empty() and row.has("script_field"): current.script_field = row.script_field
+		if not current.is_empty() and row.has("script_field"):
+			# Rows are shared: the part of the content that is shown goes on a copy.
+			current = current.duplicate()
+			current.script_field = row.script_field
 		row = current
 	try_button.visible = not row.is_empty() and Playtest.problem().is_empty() and not Playtest.story_id(row).is_empty()
 	if row.is_empty():
@@ -151,6 +222,7 @@ func refresh() -> void:
 		preview.show_story(workspace, row)
 		return
 	snapshot = row.doc.text
+	_drawn_problems = _problem_mark()
 	heading.text = Wording.title(row) + " › " + story_name(row)
 	heading.tooltip_text = heading.text
 	entries = StoryGraph.structure(row)
@@ -159,8 +231,22 @@ func refresh() -> void:
 		blocks.add_child(AuthoringLayout.label("This story belongs to the pack “%s” and cannot be changed here. Blocks can still be copied." % row.pack, 13, true))
 	elif entries.is_empty():
 		blocks.add_child(AuthoringLayout.label("Nothing happens here yet. Add the first block, or drop something from the library.", 14, true))
+	_drawn_path = str(row.doc.path) + "#" + str(row.def.id) + "#" + str(row.get("script_field", ""))
+	# At once: the blocks that were in view (or the first ones), and the one to focus.
+	if view == Vector2i.ZERO:
+		_eager_from = 0
+		_eager_to = int(entries[mini(entries.size(), 16) - 1].end_line) if not entries.is_empty() else 0
+	else:
+		_eager_from = view.x - 8
+		_eager_to = view.y + 16
+	if focus_line > 0:
+		_eager_from = mini(_eager_from, focus_line - 4)
+		_eager_to = maxi(_eager_to, focus_line + 12)
+	_eager_left = 48
 	_render("", blocks, "fight" in StoryBlocks.contexts(row))
+	_eager_left = 0
 	block_scroll.add_child(blocks)
+	set_process(not waiting.is_empty())
 	block_scroll.set_deferred("scroll_vertical", scrolled)
 	preview.show_story(workspace, row)
 	if check_timer != null and checked_revision != workspace.revision: check_timer.start()
@@ -182,8 +268,24 @@ func _render(parent_key: String, host: VBoxContainer, in_fight: bool) -> void:
 	var closing: bool = not kids.is_empty() and kids[-1].node.kind in ["choices", "goto"] and not kids[-1].node.has("inline_field")
 	for entry: Dictionary in kids:
 		if closing and is_same(entry, kids[-1]): _add_row(host, parent, in_fight)
-		_block(entry, host, in_fight)
+		_place(entry, host, in_fight)
 	if not closing: _add_row(host, parent, in_fight)
+
+## Gives a block its slot, and draws it now if it is in view.
+func _place(entry: Dictionary, host: VBoxContainer, in_fight: bool) -> void:
+	var slot := VBoxContainer.new()
+	slot.add_theme_constant_override("separation", 5)
+	var signature := _signature(entry)
+	slot.set_meta("signature", signature)
+	slot.set_meta("lines", Vector2i(int(entry.line), int(entry.end_line)))
+	host.add_child(slot)
+	_slots.append(slot)
+	if _eager_left > 0 and int(entry.end_line) > _eager_from and int(entry.line) <= _eager_to:
+		_eager_left -= 1
+		_block(entry, slot, in_fight)
+	else:
+		slot.custom_minimum_size.y = _heights.get(signature, 34.0 * maxi(1, int(entry.end_line) - int(entry.line)))
+		waiting.append({"entry": entry, "slot": slot, "in_fight": in_fight})
 
 func _block(entry: Dictionary, host: VBoxContainer, in_fight: bool) -> void:
 	match str(entry.node.kind):
@@ -219,8 +321,8 @@ func _panel(entry: Dictionary, host: VBoxContainer, container: bool) -> VBoxCont
 	var body := VBoxContainer.new()
 	body.add_theme_constant_override("separation", 3)
 	panel.add_child(body)
-	for diagnostic: Dictionary in workspace.diagnostics:
-		if diagnostic.path == row.doc.path and int(diagnostic.line) == int(entry.line) and diagnostic.severity == "error":
+	for diagnostic: Dictionary in workspace.problems_at(row.doc.path, int(entry.line)):
+		if diagnostic.severity == "error":
 			if entry.key not in selection: panel.theme_type_variation = "BlockProblem"
 			var hint := AuthoringLayout.label("⚠ " + str(diagnostic.message), 13)
 			hint.theme_type_variation = "ErrorLabel"
@@ -250,7 +352,7 @@ func _finish(entry: Dictionary, body: VBoxContainer, bar: HBoxContainer) -> void
 	more.pressed.connect(func() -> void: _open_menu(entry, more))
 	bar.add_child(more)
 	if show_line.button_pressed:
-		var raw := AuthoringLayout.label(StoryGraph._lines(row.doc)[int(entry.line) - 1].strip_edges(), 12)
+		var raw := AuthoringLayout.label(row.doc.lines()[int(entry.line) - 1].strip_edges(), 12)
 		raw.theme_type_variation = "CodeLabel"
 		body.add_child(raw)
 
@@ -321,6 +423,8 @@ func _leaf(entry: Dictionary, host: VBoxContainer) -> void:
 			prose.add_theme_font_size_override("italics_font_size", 15)
 			prose.add_theme_font_size_override("bold_font_size", 15)
 			prose.add_theme_color_override("default_color", EditorTheme.color("text"))
+			# A width before the text: without one a long paragraph is first laid out one letter per line.
+			prose.size.x = maxf(240.0, block_scroll.size.x - 90.0 - 14.0 * str(entry.indent).length() / 4.0)
 			prose.text = str(node.text) if show_line.button_pressed else Wording.marked(str(node.text), workspace)
 			prose.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			prose.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -467,7 +571,7 @@ func _container(entry: Dictionary, host: VBoxContainer, in_fight: bool) -> void:
 				var creature := SlotControl.make(workspace, {"name": "creature", "kind": "creature", "default": "", "hidden": false, "optional": false}, str(node.creature))
 				creature.picker.disabled = not writable
 				creature.edited.connect(func() -> void: _perform("Change the creature to fight", func() -> String:
-					var line := StoryGraph._lines(row.doc)[int(entry.line) - 1].strip_edges()
+					var line: String = row.doc.lines()[int(entry.line) - 1].strip_edges()
 					return StoryBlocks.set_line(row, entry, "fight " + creature.value() + line.substr(6 + str(node.creature).length()), snapshot)))
 				flow.add_child(creature)
 				if not str(node.get("variant", "")).is_empty(): flow.add_child(_plain("(" + str(node.variant) + ")", true))
@@ -537,17 +641,23 @@ func _perform(label: String, operation: Callable) -> bool:
 	if row.is_empty() or row.doc.text != snapshot:
 		problem.emit("This story changed. Choose it again before editing.")
 		return false
+	var timing := Perf.start()
 	var error := workspace.transaction(label, func() -> String:
 		var result: String = operation.call()
 		if not result.is_empty(): return result
-		var parsed := FscParser.parse(row.doc.text, row.doc.path)
+		var parsed: FscParser.Result = row.doc.parsed()
 		if not parsed.ok(): return str(parsed.diagnostics[0].message)
 		return "")
 	if not error.is_empty():
 		problem.emit(error)
 		return false
+	Perf.stop("story editor: change the text", timing)
+	timing = Perf.start()
 	refresh()
+	Perf.stop("story editor: draw the blocks", timing)
+	timing = Perf.start()
 	changed.emit(row)
+	Perf.stop("story editor: the rest of the window", timing)
 	return true
 
 func _insert(spot: Dictionary, content: String, label: String) -> bool:
@@ -843,7 +953,7 @@ func _explain(entry: Dictionary) -> void:
 		"play": text = "Another story plays, and then this one continues with the next block."
 		"show": text = "Changes the picture shown with the story."
 		"page_break": text = "The game waits here until the player continues."
-	explain.dialog_text = text + "\n\nIn the content format, line %d:\n%s" % [int(entry.line), StoryGraph._lines(row.doc)[int(entry.line) - 1].strip_edges()]
+	explain.dialog_text = text + "\n\nIn the content format, line %d:\n%s" % [int(entry.line), row.doc.lines()[int(entry.line) - 1].strip_edges()]
 	AuthoringLayout.popup(explain, Vector2i(520, 260))
 
 # ---------------------------------------------------------------- clipboard
@@ -951,6 +1061,7 @@ func _focus_line(line: int) -> void:
 			folded.erase(entry.key)
 			opened = true
 	if opened: refresh()
+	complete()
 	var best: Control = null
 	for key: String in panels:
 		var entry := _entry(key)

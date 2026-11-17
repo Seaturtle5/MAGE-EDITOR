@@ -158,7 +158,7 @@ static func create(template: Dictionary, answers: Dictionary, workspace: PackWor
 	if filled.has("error"): return filled
 	var previous_errors: Array[String] = []
 	var check := func() -> void:
-		if workspace.heavy(): workspace.check_working()
+		if workspace.rows.size() > PackWorkspace.LIGHT: workspace.check_working()
 		else: workspace.validate()
 	check.call()
 	for diagnostic: Dictionary in workspace.diagnostics:

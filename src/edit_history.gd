@@ -15,7 +15,7 @@ func capture(documents: Dictionary) -> Dictionary:
 	for path: String in documents:
 		var doc: PackDocument = documents[path]
 		if doc.writable:
-			result[path] = {"doc": doc, "text": doc.text}
+			result[path] = {"doc": doc, "text": doc.text, "version": doc.version}
 	return result
 
 func reset(documents: Dictionary) -> void:
@@ -38,7 +38,10 @@ func checkpoint(documents: Dictionary, description: String = "") -> void:
 func same(a: Dictionary, b: Dictionary) -> bool:
 	if a.size() != b.size(): return false
 	for path: String in a:
-		if not b.has(path) or a[path].text != b[path].text: return false
+		if not b.has(path): return false
+		# The same document at the same change holds the same text: no need to compare it.
+		if is_same(a[path].doc, b[path].doc) and a[path].version == b[path].version: continue
+		if a[path].text != b[path].text: return false
 	return true
 
 func restore(documents: Dictionary, snapshot: Dictionary) -> void:

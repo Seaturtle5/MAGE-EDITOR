@@ -72,7 +72,10 @@ func _apply() -> void:
 	if target.is_empty() or target.doc.text != original:
 		error.text = "The destination changed. Drop the content again."
 		return
-	if destination.has("script_field"): target.script_field = destination.script_field
+	if destination.has("script_field"):
+		# Rows are shared: the part of the content that is meant goes on a copy.
+		target = target.duplicate()
+		target.script_field = destination.script_field
 	var problem := workspace.transaction(action.label, func() -> String:
 		var result := ""
 		match str(action.kind):

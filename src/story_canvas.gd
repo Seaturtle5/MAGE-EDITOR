@@ -160,73 +160,131 @@ func tidy() -> void:
 		positions[_row_key(graph_rows[name])] = card.position_offset
 	_save_layout()
 
+## At most this many cards are drawn: a board of every story of sixty packs helps nobody.
+const MAX_CARDS := 150
+var card_marks: Dictionary = {}
+var card_keys: Array[String] = []
+var destinations: Dictionary = {}
+
+## What a card shows, as text: a card is drawn again only when this changes.
+func _card_mark(row: Dictionary) -> String:
+	var d: FscParser.Definition = row.def
+	var mark: String = str(row.sort) + "|" + str(row.get("script_field", "")) + "|" + str(str(row.doc.block(d)).hash()) + "|" + str(detailed_cards)
+	if row.doc.writable and d.type in ["scene", "menu"]: mark += "|" + str(workspace.is_used(d.id))
+	return mark
+
 func refresh() -> void:
 	if workspace == null or graph == null:
 		return
 	context_row = _fresh_row(focused_script) if not focused_script.is_empty() else (_fresh_row(focused_definition) if not focused_definition.is_empty() else {})
 	context_label.text = "All loaded stories" if show_everything and not focus_only else ("Choose a story to start writing." if context_row.is_empty() else "%s › %s › %s" % [context_row.pack, EventTriggers.title_for(workspace, context_row.def.type, context_row.def.id), str(context_row.get("script_field", "Story")).capitalize()])
-	graph.clear_connections()
-	for child: Node in graph.get_children():
-		if child is GraphNode:
-			graph.remove_child(child)
-			child.queue_free()
-	graph_rows.clear()
-	graph_options.clear()
-	graph_play_links.clear()
-	graph_continuations.clear()
-	var destinations: Dictionary = {}
-	var visible_rows: Array = workspace.rows.duplicate()
-	if not focused_script.is_empty():
-		var focused := _fresh_row(focused_script)
-		if not focused.is_empty():
-			visible_rows.push_front(focused)
-	if not show_everything and not focus_only and not focused_id.is_empty():
-		var relevant := {focused_id: true}
-		var prefix := focused_id.get_slice(".", 0)
-		for candidate: Dictionary in workspace.rows:
-			if candidate.def.id.begins_with(prefix + "."):
-				relevant[candidate.def.id] = true
-		var links := workspace.story_links()
-		for _step in 2:
-			for link: Dictionary in links:
-				if relevant.has(link.from.def.id) or relevant.has(link.target):
-					relevant[link.from.def.id] = true
-					relevant[link.target] = true
-		visible_rows = visible_rows.filter(func(candidate: Dictionary) -> bool: return relevant.has(candidate.def.id))
+	var visible_rows: Array = []
 	if focus_only and not context_row.is_empty():
 		visible_rows = [context_row]
+	elif not show_everything and not focused_id.is_empty():
+		# The story in focus, the content's own stories, and what is linked up
+		# to two steps away: found through the workspace's indexes, however
+		# many packs are loaded.
+		var relevant := {focused_id: true}
+		for candidate: Dictionary in workspace.rows_under(focused_id.get_slice(".", 0)): relevant[candidate.def.id] = true
+		var frontier: Array = relevant.keys()
+		for _step in 2:
+			var next: Array = []
+			for id: String in frontier:
+				for link: Dictionary in workspace.links_touching(id):
+					for other: String in [str(link.from.def.id), str(link.target)]:
+						if not relevant.has(other):
+							relevant[other] = true
+							next.append(other)
+			frontier = next
+		var seen: Dictionary = {}
+		for id: String in relevant:
+			for candidate: Dictionary in workspace.rows_with_id(id):
+				if not seen.has(candidate.sort):
+					seen[candidate.sort] = true
+					visible_rows.append(candidate)
+		visible_rows.sort_custom(PackWorkspace._row_order)
+		if not focused_script.is_empty():
+			var focused := _fresh_row(focused_script)
+			if not focused.is_empty(): visible_rows.push_front(focused)
+	else:
+		visible_rows = workspace.rows.duplicate()
+		if not focused_script.is_empty():
+			var focused := _fresh_row(focused_script)
+			if not focused.is_empty(): visible_rows.push_front(focused)
 	context_label.text += " · " + ("This interaction only" if focus_only else ("All packs" if show_everything else "Related stories · links up to two steps away"))
-	var y_offsets := [60.0, 60.0, 60.0]
-	var index := 0
+	var shown: Array = []
 	for row: Dictionary in visible_rows:
-		var d: FscParser.Definition = row.def
-		if d.type not in ["scene", "menu", "event", "character"] and not row.has("script_field"):
-			continue
-		var card := GraphNode.new()
-		card.name = "story_" + str(index)
-		card.title = d.id + (" · " + str(row.script_field).capitalize() if row.has("script_field") else "") + (" · " + d.mode if d.mode != "define" else "")
-		card.custom_minimum_size.x = 300 if detailed_cards else 270
-		var key := _row_key(row)
-		var column := index % 3
-		card.position_offset = positions.get(key, Vector2(45 + column * 380, y_offsets[column]))
-		card.dragged.connect(_moved.bind(key))
-		graph.add_child(card)
-		graph_rows[card.name] = row
-		if d.type in ["scene", "menu"] and not row.has("script_field") and (not destinations.has(d.id) or d.mode == "define"):
-			destinations[d.id] = card.name
-		_build_card(card, row)
-		var options := StoryGraph.choices(row)
-		graph_options[card.name] = options
-		y_offsets[column] += maxf(250.0, card.get_combined_minimum_size().y + 100.0)
-		index += 1
-	context_label.text += " · %d cards" % graph_rows.size()
-	graph.minimap_enabled = graph_rows.size() > 6
-	_settle_cards.call_deferred()
+		if row.def.type in ["scene", "menu", "event", "character"] or row.has("script_field"): shown.append(row)
+	var more := maxi(0, shown.size() - MAX_CARDS)
+	if more > 0: shown = shown.slice(0, MAX_CARDS)
+	var keys: Array[String] = []
+	for row: Dictionary in shown: keys.append(_row_key(row))
+	if keys == card_keys and graph_rows.size() == shown.size():
+		# The same cards as before: only those whose content changed are drawn again.
+		for index in shown.size():
+			var name := StringName("story_" + str(index))
+			var row: Dictionary = shown[index]
+			var mark := _card_mark(row)
+			graph_rows[name] = row
+			if card_marks.get(name, "") == mark: continue
+			var card := graph.get_node(NodePath(name)) as GraphNode
+			card.clear_all_slots()
+			for child: Node in card.get_children():
+				card.remove_child(child)
+				child.queue_free()
+			_fill_card(card, row, index)
+			card_marks[name] = mark
+			card.reset_size.call_deferred()
+	else:
+		graph.clear_connections()
+		for child: Node in graph.get_children():
+			if child is GraphNode:
+				graph.remove_child(child)
+				child.queue_free()
+		graph_rows.clear()
+		graph_options.clear()
+		graph_play_links.clear()
+		graph_continuations.clear()
+		card_marks.clear()
+		destinations.clear()
+		card_keys = keys
+		var y_offsets := [60.0, 60.0, 60.0]
+		for index in shown.size():
+			var row: Dictionary = shown[index]
+			var card := GraphNode.new()
+			card.name = "story_" + str(index)
+			card.custom_minimum_size.x = 300 if detailed_cards else 270
+			var column := index % 3
+			card.position_offset = positions.get(keys[index], Vector2(45 + column * 380, y_offsets[column]))
+			card.dragged.connect(_moved.bind(keys[index]))
+			graph.add_child(card)
+			graph_rows[card.name] = row
+			_fill_card(card, row, index)
+			card_marks[card.name] = _card_mark(row)
+			y_offsets[column] += maxf(250.0, card.get_combined_minimum_size().y + 100.0)
+		graph.minimap_enabled = graph_rows.size() > 6
+		_settle_cards.call_deferred()
+	context_label.text += " · %d cards" % graph_rows.size() + (" (%d more not drawn: choose a story to see its neighbours)" % more if more > 0 else "")
 	var context_key := _row_key(context_row) if not context_row.is_empty() else ""
 	if context_key != shown_context:
 		shown_context = context_key
 		if not context_row.is_empty(): context_changed.emit(context_row)
 		_show_context.call_deferred()
+	_connect_cards()
+
+## Puts a card's content in: its title, summary and the dots its links start from.
+func _fill_card(card: GraphNode, row: Dictionary, _index: int) -> void:
+	var d: FscParser.Definition = row.def
+	card.title = d.id + (" · " + str(row.script_field).capitalize() if row.has("script_field") else "") + (" · " + d.mode if d.mode != "define" else "")
+	if d.type in ["scene", "menu"] and not row.has("script_field") and (not destinations.has(d.id) or d.mode == "define"):
+		destinations[d.id] = card.name
+	_build_card(card, row)
+	graph_options[card.name] = StoryGraph.choices(row)
+
+## Draws the lines between the cards again.
+func _connect_cards() -> void:
+	graph.clear_connections()
 	for from_name: StringName in graph_rows:
 		var row: Dictionary = graph_rows[from_name]
 		var options: Array = graph_options[from_name]
@@ -374,7 +432,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 		var slot := card.get_child_count()
 		card.add_child(play_label)
 		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("a4c9a2"))
-	if row.doc.writable and d.type in ["scene", "menu"] and not row.has("script_field") and workspace.uses(d.id).is_empty():
+	if row.doc.writable and d.type in ["scene", "menu"] and not row.has("script_field") and not workspace.is_used(d.id):
 		var hint := AuthoringLayout.label("⚠ Nothing leads here yet", 12, true)
 		card.add_child(hint)
 

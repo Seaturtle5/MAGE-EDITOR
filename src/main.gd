@@ -125,6 +125,8 @@ func _ready() -> void:
 	_build_ui()
 	_build_workflow()
 	workspace.history.changed.connect(_history_changed)
+	workspace.checked.connect(_on_checked)
+	workspace.packs_loaded.connect(_on_packs_loaded)
 	get_window().files_dropped.connect(_files_dropped)
 	var timer := Timer.new()
 	timer.wait_time = 30
@@ -143,6 +145,27 @@ func _ready() -> void:
 		_open_target(working)
 	else:
 		_set_status("Open a pack to start writing.")
+
+func _process(_delta: float) -> void:
+	workspace.poll()
+
+## A check on another thread has brought its result.
+func _on_checked() -> void:
+	_refresh_diagnostics()
+	if story_editor != null: story_editor.problems_changed()
+	if home != null and tabs.current_tab == 6: home.refresh(workspace)
+	if check_wanted:
+		check_wanted = false
+		_report_check()
+
+## The packs beside the working pack are in.
+func _on_packs_loaded(count: int, refused: Dictionary) -> void:
+	_refresh_all()
+	_set_status("%d pack%s loaded to use %s content%s. They cannot be changed here." % [count, "" if count == 1 else "s", "its" if count == 1 else "their", " (%d could not be added)" % refused.size() if not refused.is_empty() else ""])
+	workspace.request_check()
+	_refresh_diagnostics()
+
+var check_wanted := false
 
 func _build_theme() -> void:
 	var preferences := ConfigFile.new()
@@ -901,20 +924,19 @@ func _directory_selected(path: String) -> void:
 			# A folder of packs: add every pack inside it.
 			var inside: Array = []
 			for name: String in DirAccess.get_directories_at(path):
-				if FileAccess.file_exists(path.path_join(name).path_join("pack.fsc")) and path.path_join(name) != workspace.target: inside.append(path.path_join(name))
+				if FileAccess.file_exists(path.path_join(name).path_join("pack.fsc")) and path.path_join(name) != workspace.target and path.path_join(name) not in workspace.pack_paths: inside.append(path.path_join(name))
 			if inside.is_empty():
-				_show_error("This folder holds no pack. Choose a pack's own folder (the one with pack.fsc), or a folder of packs.")
+				_show_error("This folder holds no pack that is not loaded yet. Choose a pack's own folder (the one with pack.fsc), or a folder of packs.")
 				return
-			var refused := workspace.add_references(inside)
-			_refresh_all()
-			_set_status("Added %d pack%s to use their content%s.%s" % [inside.size() - refused.size(), "" if inside.size() - refused.size() == 1 else "s", " (%d could not be added)" % refused.size() if not refused.is_empty() else "", " With this many packs, the full check runs when you choose Check." if workspace.heavy() else ""])
+			_load_packs(inside)
 			return
-		var error := workspace.add_reference(path)
-		if not error.is_empty():
-			_show_error(error)
+		if path == workspace.target or path in workspace.pack_paths:
+			_show_error("This pack is already loaded.")
 			return
-		_refresh_all()
-		_set_status("The pack is loaded to use its content. It cannot be changed here; using something from it adds it to the packs yours needs.")
+		if PackWorkspace.read_manifest(path).is_empty():
+			_show_error("Choose a folder with a valid pack.fsc.")
+			return
+		_load_packs([path])
 	elif workspace.dirty_count() > 0:
 		pending_action = "replace_target"
 		pending_path = path
@@ -922,6 +944,15 @@ func _directory_selected(path: String) -> void:
 		confirm.popup_centered()
 	else:
 		_open_target(path)
+
+## Loads packs to use their content, without holding up the window.
+func _load_packs(folders: Array) -> void:
+	if workspace.loading:
+		_show_error("Packs are still being loaded. Add more when they are in.")
+		return
+	workspace.load_packs(folders)
+	_set_status("Loading %d pack%s to use %s content…" % [folders.size(), "" if folders.size() == 1 else "s", "its" if folders.size() == 1 else "their"])
+	_refresh_diagnostics()
 
 func _confirmed() -> void:
 	if pending_action == "replace_target":
@@ -931,6 +962,8 @@ func _confirmed() -> void:
 		if not recovery_pending: drafts.discard(workspace.target)
 		playtest.stop()
 		playtest.clear()
+		get_window().hide()
+		workspace.settle()
 		get_tree().quit()
 	elif pending_action == "delete":
 		_delete_selected()
@@ -942,6 +975,8 @@ func _notification(what: int) -> void:
 		if workspace.dirty_count() == 0:
 			playtest.stop()
 			playtest.clear()
+			get_window().hide()
+			workspace.settle()
 			get_tree().quit()
 		else:
 			pending_action = "quit"
@@ -965,8 +1000,12 @@ func _open_target(path: String) -> void:
 	tabs.set_tab_hidden(3, not has_story)
 	tabs.current_tab = 3 if has_story else 4
 	_refresh_all()
-	_set_status("Working pack opened. Other loaded packs are read-only.")
+	_set_status("Working pack opened.")
 	_set_preference("workspace", "last_pack", workspace.target)
+	# The packs that belong with it are loaded behind the scenes; the check follows them.
+	var beside: Array = workspace.packs_beside() if bool(_preference("workspace", "load_beside", true)) else []
+	if not beside.is_empty(): _load_packs(beside)
+	elif workspace.rows.size() > PackWorkspace.LIGHT: workspace.request_check()
 	_navigate(6)
 	_offer_recovery()
 	if DisplayServer.get_name() != "headless" and "--script" not in OS.get_cmdline_args() and not bool(_preference("help", "tour_seen", false)):
@@ -974,21 +1013,31 @@ func _open_target(path: String) -> void:
 		_show_tour()
 
 func _refresh_all() -> void:
+	var timing := Perf.start()
 	var info := workspace.manifest(workspace.target)
 	var others := maxi(0, workspace.pack_paths.size() - 1)
 	pack_label.text = str(workspace.title_of("pack", str(info.get("id", ""))) if not workspace.title_of("pack", str(info.get("id", ""))).is_empty() else info.get("id", "Open a pack")) + ("  ·  uses %d other pack%s" % [others, "" if others == 1 else "s"] if others > 0 else "")
 	pack_label.tooltip_text = workspace.target
 	_refresh_crumbs()
 	_refresh_browser()
+	Perf.stop("window: library", timing)
+	timing = Perf.start()
 	_refresh_references()
 	_refresh_values()
 	_refresh_diagnostics()
+	Perf.stop("window: lists", timing)
+	timing = Perf.start()
 	_refresh_selection()
+	Perf.stop("window: selection", timing)
+	timing = Perf.start()
 	_refresh_graph()
+	Perf.stop("window: board and blocks", timing)
+	timing = Perf.start()
 	if home != null and tabs.current_tab == 6: home.refresh(workspace)
 	_history_changed()
 	if world_canvas != null and tabs.current_tab == 5:
 		world_canvas.refresh()
+	Perf.stop("window: home, history, map", timing)
 
 func _matches_group(type: String) -> bool:
 	if group == "All":
@@ -1000,9 +1049,25 @@ func _matches_group(type: String) -> bool:
 		return true
 	return type in GROUPS[group] or (group == "Rules" and type.ends_with("_rules"))
 
+var library_mark := ""
+
+## What the library lists, as text: it is filled again only when this changes.
+func _library_mark() -> String:
+	var parts: PackedStringArray = [group, search.text, workspace._reference_cache_key, str(workspace.rows.size())]
+	for path: String in workspace._own_rows:
+		for row: Dictionary in workspace._own_rows[path].rows:
+			parts.append(str(row.sort) + "=" + (str(row.def.fields.name.value) if row.def.fields.has("name") else "") + str(row.def.mode))
+	return str("\n".join(parts).hash()) + ":" + str(parts.size())
+
 func _refresh_browser() -> void:
 	if browser == null:
 		return
+	var mark := _library_mark()
+	if mark == library_mark and browser.get_root() != null:
+		# The same entries: they only need the rows as they are now.
+		_renew_library(browser.get_root())
+		return
+	library_mark = mark
 	browser.clear()
 	var root := browser.create_item()
 	var query := search.text.to_lower()
@@ -1066,6 +1131,16 @@ func _refresh_browser() -> void:
 			section.collapsed = false
 			_fill_library_section(section)
 
+## Gives every listed entry its row as it is after a change.
+func _renew_library(item: TreeItem) -> void:
+	while item != null:
+		var data: Variant = item.get_metadata(0)
+		if data is Dictionary and data.has("def") and data.has("doc") and data.doc.writable and data.def.type != "file":
+			var fresh := workspace.find_row(data.doc.path, data.def.type, data.def.id, data.def.mode, data.get("ordinal", 0))
+			if not fresh.is_empty(): item.set_metadata(0, fresh)
+		if item.get_first_child() != null: _renew_library(item.get_first_child())
+		item = item.get_next()
+
 func _library_item(parent: TreeItem, row: Dictionary, with_kind: bool) -> void:
 	var item := browser.create_item(parent)
 	item.set_text(0, (Wording.icon(row.def.type) + " " if with_kind else "") + Wording.title(row) + ("  [" + str(row.def.mode) + "]" if row.def.mode != "define" else ""))
@@ -1110,14 +1185,32 @@ func _on_browser_selected() -> void:
 			tabs.current_tab = 4
 
 func _refresh_selection() -> void:
-	if visual_details != null:
-		visual_details.show_definition(workspace, selected)
+	# The Details page is drawn when it is looked at.
+	if visual_details != null: visual_details.show_definition(workspace, selected, tabs == null or tabs.current_tab == 4)
+	if selected.is_empty():
+		heading.text = "Choose something to edit"
+		detail.text = "Select a definition from the content browser."
+	else:
+		var d: FscParser.Definition = selected.def
+		var doc: PackDocument = selected.doc
+		heading.text = Wording.icon(d.type) + " " + Wording.title(selected)
+		detail.text = Wording.name(d.type).capitalize() + ("   ·   from the pack “%s”, read-only" % selected.pack if not doc.writable else "")
+		detail.tooltip_text = "Technical ID: %s\n%s, line %d" % [d.id, doc.path, d.line]
+		_refresh_crumbs()
+		_refresh_content_tools()
+	# The technical views hold whole files: they are filled when looked at.
+	technical_stale = true
+	if tabs != null and tabs.current_tab <= 2: _refresh_technical()
+
+var technical_stale := false
+
+## Fills the Writing, Fields and Source views for the selected content.
+func _refresh_technical() -> void:
+	technical_stale = false
 	updating = true
 	script_picker.clear()
 	field_picker.clear()
 	if selected.is_empty():
-		heading.text = "Choose something to edit"
-		detail.text = "Select a definition from the content browser."
 		writing.text = ""
 		field_editor.text = ""
 		source.text = ""
@@ -1128,11 +1221,6 @@ func _refresh_selection() -> void:
 		return
 	var d: FscParser.Definition = selected.def
 	var doc: PackDocument = selected.doc
-	heading.text = Wording.icon(d.type) + " " + Wording.title(selected)
-	detail.text = Wording.name(d.type).capitalize() + ("   ·   from the pack “%s”, read-only" % selected.pack if not doc.writable else "")
-	detail.tooltip_text = "Technical ID: %s\n%s, line %d" % [d.id, doc.path, d.line]
-	_refresh_crumbs()
-	_refresh_content_tools()
 	source.text = doc.text
 	source.editable = doc.writable
 	if d.type in ["scene", "text", "menu"]:
@@ -1341,19 +1429,26 @@ func _insert_at_writer(text: String) -> void:
 	writing.grab_focus()
 
 func _validate() -> void:
-	if workspace.heavy():
-		_set_status("Checking every loaded pack with the game engine. With this many packs it takes a little while…")
-		await get_tree().process_frame
-		await get_tree().process_frame
-	workspace.validate()
-	_refresh_values()
+	if workspace.target.is_empty(): return
+	if workspace.rows.size() <= PackWorkspace.LIGHT:
+		workspace.validate(true)
+		_refresh_values()
+		_refresh_diagnostics()
+		if home != null: home.refresh(workspace)
+		_report_check()
+		return
+	# Every pack's stories are checked again, on another thread.
+	check_wanted = true
+	workspace.request_check(true)
+	_set_status("Checking every loaded pack with the game engine. You can keep working; the result appears here.")
 	_refresh_diagnostics()
-	if home != null: home.refresh(workspace)
+
+func _report_check() -> void:
 	var errors := workspace.diagnostics.filter(func(item: Dictionary) -> bool: return item.severity == "error").size()
 	if not workspace.diagnostics.is_empty():
 		_set_side_panel(true)
 		side_tabs.current_tab = 2
-	_set_status("Checked the pack with the game engine, unsaved changes included: " + ("no problems." if workspace.diagnostics.is_empty() else "%d problem%s, %d note%s." % [errors, "" if errors == 1 else "s", workspace.diagnostics.size() - errors, "" if workspace.diagnostics.size() - errors == 1 else "s"]))
+	_set_status("Checked with the game engine, unsaved changes included: " + ("no problems." if workspace.diagnostics.is_empty() else "%d problem%s, %d note%s." % [errors, "" if errors == 1 else "s", workspace.diagnostics.size() - errors, "" if workspace.diagnostics.size() - errors == 1 else "s"]))
 
 func _refresh_diagnostics() -> void:
 	if diagnostics_list == null: return
@@ -1363,7 +1458,11 @@ func _refresh_diagnostics() -> void:
 		if item.severity == "error": errors += 1
 		diagnostics_list.add_item("%s  %s, line %d\n%s" % ["⚠ Problem" if item.severity == "error" else "Note", str(item.path).get_file(), int(item.line), item.message])
 		diagnostics_list.set_item_metadata(diagnostics_list.item_count - 1, item)
-	if check_state != null:
+	if check_state != null and (workspace.loading or workspace.checking):
+		check_state.text = "⏳" if compact else ("⏳ Loading packs…" if workspace.loading else "⏳ Checking…")
+		check_state.tooltip_text = "The packs beside yours are being loaded. You can already work." if workspace.loading else "The game engine is checking your pack against the others. You can keep working."
+		check_state.add_theme_color_override("font_color", EditorTheme.color("muted"))
+	elif check_state != null:
 		var fresh: bool = workspace.validation_revision == workspace.revision
 		check_state.text = ("⚠ %d" % errors if compact else "⚠ %d problem%s" % [errors, "" if errors == 1 else "s"]) if errors > 0 else ("✓" if compact else "✓ No problems" if fresh else "✓ Check")
 		check_state.tooltip_text = ("%d problem%s found. Choose to check again and list them." % [errors, "" if errors == 1 else "s"]) if errors > 0 else ("No problems found by the game engine." if fresh else "Check the pack with the game engine and list any problems.")
@@ -1734,10 +1833,14 @@ func _open_visual_script(row: Dictionary, field: String) -> void:
 
 func _refresh_graph() -> void:
 	if story_canvas != null:
+		var timing := Perf.start()
 		story_canvas.refresh()
+		Perf.stop("window: board", timing)
+		timing = Perf.start()
 		if story_editor != null and not story_canvas.context_row.is_empty():
 			story_editor.show_story(workspace, story_canvas.context_row)
 			story_editor.visible = tabs.current_tab == 3
+		Perf.stop("window: blocks", timing)
 
 func _on_canvas_changed(row: Dictionary) -> void:
 	selected = row
@@ -1953,6 +2056,8 @@ func _entries_ready() -> bool:
 	return true
 
 func _on_tab_changed(index: int) -> void:
+	if index <= 2 and technical_stale: _refresh_technical()
+	if index == 4 and visual_details != null: visual_details.draw_if_stale()
 	if story_editor != null: story_editor.visible = index == 3 and not story_editor.row.is_empty()
 	for key: int in nav_buttons: nav_buttons[key].set_pressed_no_signal(key == index)
 	_refresh_content_tools()
