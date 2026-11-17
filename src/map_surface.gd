@@ -198,7 +198,9 @@ func _draw() -> void:
 		var named: bool = _labels.has(place.id)
 		if not named and place.id != selected and place.id != hovered: continue
 		var text_size := font.get_string_size(str(place.name), HORIZONTAL_ALIGNMENT_LEFT, -1, size_f)
-		var offset: Vector2 = _labels.get(place.id, Vector2(0, r + 6.0 + text_size.y / 2.0))
+		var offset: Vector2 = _labels.get(place.id, Vector2(0, r + 9.0 + text_size.y / 2.0))
+		# The chosen place wears a ring: its name stands clear of it.
+		if place.id == selected: offset += offset.normalized() * 5.0
 		var box := Rect2(centre + offset - text_size / 2.0, text_size)
 		draw_rect(box.grow(2), Color(EditorTheme.color("bg"), 0.9 if not named else 0.72), true)
 		var colour := EditorTheme.color("text") if place.own or place.id == selected else EditorTheme.color("muted")
