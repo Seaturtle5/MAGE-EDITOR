@@ -11,7 +11,7 @@ static var light := false
 ## is told from the next by its fill and by a line: `border` around what lies on
 ## a page, the stronger `edge` around what floats. `muted` is second-rank text,
 ## `faint` is text that cannot be used now. The dark theme's background and
-## text are the game's own; `theme_test.gd` keeps the layers apart and the
+## text are the game's own; the editor's tests keep the layers apart and the
 ## text readable in both themes.
 static func color(key: String) -> Color:
 	var dark := {"bg": "0f0e0c", "well": "090807", "surface": "1b1916", "raised": "2a2621", "hover": "3b352d", "border": "4b4339", "edge": "7a6e5b", "popup": "342f28", "text": "ece5d8", "muted": "b5ac9d", "faint": "857c6e", "accent": "e8a655", "selected": "553a1c", "bad": "e27a66", "info": "8db4d2", "good": "9bc791", "on_accent": "1a1208"}
