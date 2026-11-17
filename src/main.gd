@@ -305,7 +305,11 @@ func _build_ui() -> void:
 	motion.text = "Reduce motion"
 	motion.tooltip_text = "Switch off fades and other movement."
 	motion.button_pressed = bool(_preference("appearance", "reduce_motion", false))
-	motion.toggled.connect(func(enabled: bool) -> void: _set_preference("appearance", "reduce_motion", enabled))
+	motion.toggled.connect(func(enabled: bool) -> void:
+		_set_preference("appearance", "reduce_motion", enabled)
+		if story_canvas != null and story_canvas.bubbles != null:
+			story_canvas.bubbles.still = enabled
+			story_canvas.bubbles.queue_redraw())
 	settings_body.add_child(motion)
 	var advanced := CheckButton.new()
 	advanced.text = "Technical views"

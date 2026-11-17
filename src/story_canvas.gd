@@ -72,6 +72,8 @@ var flow_names: Dictionary = {}
 ## The card of the story in focus: what starts it, and where its flow begins.
 var focus_card := StringName()
 var _flow_drawn := false
+## Bubbles that float along the lines the way they lead (arrowheads with Reduce motion).
+var bubbles: FlowBubbles
 const FLOW_ORIGIN := Vector2(40, 50)
 const FLOW_TINTS := {"start": "event", "run": "scene", "if": "values", "choices": "item", "fight": "creature", "end": "quest", "stop": "quest", "more": "pack"}
 
@@ -128,6 +130,10 @@ func _ready() -> void:
 	graph.disconnection_request.connect(_disconnect_response)
 	graph.node_selected.connect(_node_selected)
 	add_child(graph)
+	bubbles = FlowBubbles.new()
+	bubbles.graph = graph
+	bubbles.still = bool(EditorPrefs.read("appearance", "reduce_motion", false))
+	graph.add_child(bubbles)
 	_build_picker()
 	_build_long_writer()
 	remove_dialog = ConfirmationDialog.new()
