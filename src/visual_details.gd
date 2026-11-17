@@ -736,6 +736,19 @@ func _add_field(key: String, kind: String) -> void:
 	if d.type in ["shop", "status_bar"] and key == "currency" and (value.is_empty() or not value.begins_with("item ") or workspace.preview_content().has(value.trim_prefix("item ").strip_edges(), "item")):
 		_add_currency_field(key, value)
 		return
+	if d.type == "creature" and key == "variants":
+		var shapes := VariantSheets.read(doc, field)
+		if shapes.ok:
+			var sheets := VariantSheets.new()
+			sheets.configure(workspace, shapes.variants, doc.writable, StoryBlocks.contexts(row))
+			sheets.edited.connect(func(text: String) -> void:
+				if text.is_empty(): _clear_nested(key)
+				else: _set_value(key, text, true))
+			body.add_child(sheets)
+			return
+	if d.type == "form" and key == "offspring gender" and (value.is_empty() or _read_lean(value).size() == 3):
+		_add_lean_field(key, value)
+		return
 	if PairRows.has_rows(d.type, key):
 		var rules: Dictionary = PairRows.SPECS[d.type + "/" + key]
 		var pairs := PairRows.read(doc, field, rules)
@@ -1254,6 +1267,44 @@ func _add_formula_field(key: String, value: String) -> void:
 		line.add_child(calculate)
 
 ## "1 in 3": how many times out of how many.
+## "male 9 in 10" as ["male", 9, 10]; empty when it is written another way.
+static func _read_lean(value: String) -> Array:
+	var found := RegEx.create_from_string("^(\\w+(?: \\w+)?) (\\d+) in (\\d+)$").search(value.strip_edges())
+	return [found.get_string(1), int(found.get_string(2)), int(found.get_string(3))] if found != null else []
+
+## The gender a body's children lean toward: a gender and how often.
+func _add_lean_field(key: String, value: String) -> void:
+	var lean := _read_lean(value)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var genders: Array = ["male", "female", "herm", "trans male", "trans female"]
+	if not lean.is_empty() and lean[0] not in genders: genders.append(lean[0])
+	var gender := OptionButton.new()
+	gender.add_item("No lean")
+	for name: String in genders: gender.add_item(name.capitalize())
+	gender.select(genders.find(lean[0]) + 1 if not lean.is_empty() else 0)
+	gender.disabled = not row.doc.writable
+	line.add_child(gender)
+	var times := SpinBox.new()
+	var out_of := SpinBox.new()
+	for box: SpinBox in [times, out_of]:
+		box.max_value = 100000
+		box.editable = row.doc.writable
+	out_of.min_value = 1
+	times.set_value_no_signal(lean[1] if not lean.is_empty() else 9)
+	out_of.set_value_no_signal(lean[2] if not lean.is_empty() else 10)
+	line.add_child(times)
+	line.add_child(AuthoringLayout.label("in", 14, true))
+	line.add_child(out_of)
+	line.add_child(AuthoringLayout.label("children", 14, true))
+	var write := func() -> void:
+		if gender.selected == 0: _clear_item_field(key)
+		else: _set_value(key, "%s %d in %d" % [genders[gender.selected - 1], int(times.value), int(out_of.value)])
+	gender.item_selected.connect(func(_index: int) -> void: write.call())
+	times.value_changed.connect(func(_number: float) -> void: write.call())
+	out_of.value_changed.connect(func(_number: float) -> void: write.call())
+
 ## "24 to 48" as [24, 48], a single number as twice itself; empty when it is written another way.
 static func _read_range(value: String) -> Array:
 	var parts := value.split(" to ")

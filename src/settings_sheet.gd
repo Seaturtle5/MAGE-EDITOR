@@ -16,6 +16,27 @@ const PART_WORDS := [
 	["covering", "Covering", "word", "Fur, scales, latex, skin…"],
 	["adjective", "Adjective", "word", "One word for the part."]]
 const SHEETS := {
+	# One variant of a creature (see VariantSheets).
+	"creature/variant": [
+		["gender", "Gender", "choice", "What this shape counts as for the player's content settings.", Validator.CREATURE_GENDERS],
+		["filters", "Content filters", "text", "Filters, with commas between: a player who has banned one never meets this shape."],
+		["when", "Only when", "condition", "This shape is met only while this is true."],
+		["chance", "Weight", "number", "How often this shape is picked compared with the others. 1 when not set."],
+		["title", "Called", "text", "The name shown for this shape, when it differs."],
+		["image", "Picture", "text", "The picture of this shape (a picture's ID)."],
+		["infection sex", "Infects toward", "choice", "The sex its infection pushes the player toward.", ["male", "female", "herm", "neuter"]],
+		["level", "Level", "number", ""],
+		["hp", "Health", "number", ""],
+		["damage", "Damage", "number", ""],
+		["libido", "Libido", "number", ""],
+		["hit bonus", "Hit bonus", "number", ""],
+		["dodge bonus", "Dodge bonus", "number", ""],
+		["mind bonus", "Mind bonus", "number", ""],
+		["stats", "Attributes", "text", "Such as: strength 12, dexterity 10."],
+		["loot", "Drops", "text", "An item and how often, such as: wolf_fur 40%."],
+		["special", "Special rule", "text", "A special rule of the fight, as the creature's own."],
+		["seduction immune", "Cannot be seduced", "switch", ""],
+	],
 	"item/equipment": [
 		["slot", "Worn on", "choice", "Where it is worn. One thing fits each place; “none” takes no place.", ItemSystem.SLOTS, "", true],
 		["placement", "Described with", "choice", "Where its worn text goes in the player's description. Head, body and shield also decide where the armour protects.", ItemSystem.PLACEMENTS, "end"],

@@ -89,7 +89,7 @@ The game is taken from the engine checkout the editor was started with (`--engin
 
 ## Not finished
 
-- A creature's variants, a form's lean towards one gender for its offspring, and the rules for importing another game's saves are typed in the format's words in a text box. Every other field has its own control: a picker, number boxes, a switch, chips, a condition in words, rows, or a text box for words the player reads.
+- The rules for importing another game's saves are typed in the format's words in a text box. Every other field has its own control: a picker, number boxes, a switch, chips, a condition in words, rows, sheets (also one for each variant of a creature), or a text box for words the player reads.
 - A calculation is built from chips: numbers, counters, plus, minus, times, divided by, brackets and random spans. The smaller or larger of two numbers, a square root and an entry of a list are shown when a calculation holds them, but cannot be added with a button yet.
 - The map does not set travel order, map grids or hand-set map positions; a door that leads into an area is set in the door's details.
 - Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.
