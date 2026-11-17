@@ -2046,9 +2046,45 @@ func _refresh_content_tools() -> void:
 		content_tools.add_child(button)
 	if row.def.type == "quest": add.call("🏁 What moves it?", "See which stories set each stage of this quest, and add more.", func() -> void: actions.quest_flow(row), row.doc.writable)
 	add.call("🔗 %d" % used, "Where is this used? %d place%s in your pack." % [used, "" if used == 1 else "s"], func() -> void: actions.show_uses(row))
+	if not row.doc.writable and row.def.mode != "extend" and ContentDB.SCHEMA.get(row.def.type, {}).has("image") and row.def.type != "image":
+		# Another pack's content can be given a picture of yours: your pack then adds it to that content.
+		var picture := PickerButton.new()
+		picture.placeholder = "🖼"
+		picture.text = "🖼"
+		picture.theme_type_variation = "Ghost"
+		picture.workspace = workspace
+		picture.drop_kinds = ["image"]
+		picture.tooltip_text = "Give it a picture from your pack. Your pack then adds the picture to this content of “%s”." % row.pack
+		picture.label_for = func(_value: String) -> String: return "🖼"
+		picture.options = func() -> Array:
+			var result: Array = []
+			for other: Dictionary in workspace.rows:
+				if other.def.type == "image" and other.doc.writable: result.append({"value": other.def.id, "label": Wording.title(other), "detail": str(other.def.fields.artist.value) if other.def.fields.has("artist") else ""})
+			if result.is_empty(): result.append({"value": "", "label": "Your pack has no pictures yet. Import one from the Pack menu."})
+			return result
+		picture.picked.connect(func(image: String) -> void:
+			if image.is_empty(): return
+			var error := give_picture(row, image)
+			if not error.is_empty(): _show_error(error)
+			else:
+				_refresh_all()
+				_set_status("“%s” now shows your picture." % Wording.title(row), true))
+		content_tools.add_child(picture)
 	add.call("✎", "Rename everywhere it is used.", func() -> void: actions.rename(row), row.doc.writable)
 	add.call("⧉", "Duplicate" if row.doc.writable else "Copy into my pack", func() -> void: actions.make_copy(row))
 	add.call("🗑", "Delete, after showing what uses it.", func() -> void: actions.delete(row), row.doc.writable)
+
+## Gives another pack's content a picture of the working pack: an addition
+## to that content in the working pack, which then needs the other pack.
+func give_picture(row: Dictionary, image: String) -> String:
+	if row.is_empty() or row.doc.writable: return "Choose content of another pack. Your own content takes its picture in Details."
+	return workspace.transaction("Give %s a picture" % Wording.title(row), func() -> String:
+		for own: Dictionary in workspace.rows_with_id(row.def.id):
+			if own.doc.writable and own.def.type == row.def.type and own.def.mode == "extend":
+				var changed: String = own.doc.set_field(own.def, "image", image)
+				return changed if not changed.is_empty() else workspace.add_requirement(row.pack)
+		var made := workspace.create_definition(row.def.type, row.def.id, "extend", "image: " + image)
+		return made if not made.is_empty() else workspace.add_requirement(row.pack))
 
 func _delete_selected() -> void:
 	if selected.is_empty() or not selected.doc.writable:

@@ -42,6 +42,10 @@ A pack rarely stands alone: it uses the base pack's items, another author's plac
 
 Without the packs it uses, a pack shows a problem for everything it takes from them. If your packs are not kept side by side, add them with **Pack → Add another pack**.
 
+## A pack of pictures
+
+A pack can hold pictures for other packs' content. On the pack's own page, **Art** says how they count: **Replaces** puts them in place of the content's own pictures, **Fallback** only fills gaps. Import the pictures (**Pack → Import a picture**), open the other pack's character, place, creature or item from the library, and choose the small **🖼** beside its name: your pack then adds the picture to that content, and the other pack's files stay as they are.
+
 ## Guided tasks
 
 On Home, choose a task: talk to a character, something happens at a place, make an item, start a quest, add a place, open a shop, write an ending. With the Flexible Survival base pack loaded there are eight more. A task asks a few questions page by page and shows what it will make. A place or an area that does not exist yet can be made on the spot from only a name. **Create** makes everything, connected, as one step you can undo.
