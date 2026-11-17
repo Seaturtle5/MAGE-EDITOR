@@ -294,7 +294,7 @@ func _build_picker() -> void:
 		picker.text = picker.placeholder
 		picker.options = _options
 		picker.label_for = func(id: String) -> String: return BlockCatalog.label(spec, id, workspace)
-		picker.drop_kinds = _content_types(kind)
+		picker.drop_kinds = spec.get("types", _content_types(kind))
 		picker.picked.connect(func(_next: String) -> void: edited.emit())
 		# Results and stages can be made where they are first needed.
 		if kind == "result": picker.commands = [{"label": "+ New result…", "action": func() -> void: _new_word("result", "What can come of this event? One or two words, such as “taken” or “left behind”.")}]
@@ -338,7 +338,7 @@ func _options() -> Array:
 		return result
 	for special: String in SPECIAL.get(kind, []): result.append({"value": special, "label": BlockCatalog.content_label(kind, special, workspace)})
 	if kind == "item" and peers.is_valid() and not _peer("creature").is_empty(): result.append({"value": "none", "label": "nothing"})
-	var types := _content_types(kind)
+	var types: Array = spec.get("types", _content_types(kind))
 	var seen: Dictionary = {}
 	for row: Dictionary in workspace.rows:
 		if row.def.type not in types or row.def.mode == "extend" or seen.has(row.def.id): continue

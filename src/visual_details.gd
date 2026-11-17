@@ -12,7 +12,8 @@ const REFERENCES := {
 	"lives at": ["location"], "start": ["location"], "region": ["region"], "zone": ["zone"],
 	"form": ["form"], "purified": ["item"], "image": ["image"], "logo": ["image"], "background": ["image"],
 	"run by": ["character"], "found in": ["zone"], "items": ["item"], "at": ["location"],
-	"trades for": ["item"], "generic": ["event"], "leads to zone": ["zone"], "milk item": ["item"], "cum item": ["item"]
+	"trades for": ["item"], "generic": ["event"], "leads to zone": ["zone"], "milk item": ["item"], "cum item": ["item"],
+	"cross infection": ["form"]
 }
 const PRIMARY_FIELDS := ["name", "description", "pronouns", "image", "lives at", "found by", "repeat", "requires", "chance", "cooldown", "priority", "category", "weight", "level", "hp", "damage", "zone", "start"]
 const SWITCH_FIELDS := {
@@ -24,16 +25,19 @@ const SWITCH_FIELDS := {
 	"condition": ["blocks rest"],
 	"shop": ["trades"],
 	"heat": ["female", "mpreg"],
-	"interest": ["default"]
+	"interest": ["default"],
+	"form": ["sex by preference"]
 }
 const CHOICE_FIELDS := {
 	"event": {"repeat": ["once", "until resolved", "always"]},
+	"form": {"sex": ["male", "female", "herm"]},
+	"item": {"category": ["food", "drink", "medical", "weapon", "clothing", "collectible", "other"]},
 	"creature": {"active": ["always", "day", "night"], "gender": Validator.CREATURE_GENDERS, "strike with": CombatSystem.ATTRIBUTES},
 	"character": {"pronouns": ["he", "she", "they", "it", "by body"]}
 }
 const NUMBER_FIELDS := {
 	"item": ["weight"],
-	"event": ["priority", "cooldown"],
+	"event": ["priority", "cooldown", "level", "min score"],
 	"creature": ["level", "hp", "damage", "libido", "hit bonus", "dodge bonus", "mind bonus"],
 	"feat": ["exploration bonus", "encounter bonus", "scavenge bonus"],
 	"game_mode": ["exploration bonus", "encounter bonus", "scavenge bonus", "carry bonus", "loot bonus"],
@@ -45,7 +49,26 @@ const NUMBER_FIELDS := {
 	"heat": ["cycle", "duration"],
 	"rest_rules": ["duration", "fresh below", "fresh fatigue", "exhausted recovery", "hammock fresh fatigue", "hammock recovery", "collapse at", "collapse fatigue", "collapse turns"],
 	"ending": ["priority"],
-	"form": ["libido"]
+	"form": ["libido", "scale"],
+	"infection_rules": ["modest cock length", "modest ball size", "modest cunt depth", "modest cunt tightness"]
+}
+## Numbers that may also be a calculation (level * 2).
+const FORMULA_FIELDS := {
+	"captivity": ["escape at"],
+	"companion_rules": ["party size", "companion xp", "player xp cost", "level up at", "damage every", "dexterity every", "hit bonus"],
+	"vore_rules": ["vore chance", "vore chance out of", "unbirth chance", "unbirth chance out of", "absorb above"],
+	"hunt_rules": ["target weight"],
+	"level_rules": ["xp needed"],
+	"combat_rules": ["level limit"]
+}
+## Chances written "N in M".
+const CHANCE_FIELDS := {
+	"shop": ["trade bonus chance"],
+	"infection_rules": ["resist chance", "twice chance"],
+	"combat_rules": ["creature chance"],
+	"heat_rules": ["intense lengthens", "intense quickens"],
+	"pregnancy_rules": ["odds", "self odds", "sire odds", "albino", "melanism"],
+	"rest_rules": ["interruption chance"]
 }
 ## Lists of short words shown as chips; the value names where suggestions come from.
 const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": "", "outcomes": ""}
@@ -117,7 +140,12 @@ func _ready() -> void:
 	trigger_dialog.confirmed.connect(_apply_triggers)
 	add_child(trigger_dialog)
 
-func show_definition(value: PackWorkspace, selected: Dictionary) -> void:
+## Set when the page holds content it has not drawn yet (it was not in view).
+var stale := false
+
+## Takes the content to show. With `draw` off the page is only drawn when
+## draw_if_stale() is called: filling a page nobody looks at costs time.
+func show_definition(value: PackWorkspace, selected: Dictionary, draw: bool = true) -> void:
 	if pending_rows:
 		return
 	workspace = value
@@ -131,7 +159,13 @@ func show_definition(value: PackWorkspace, selected: Dictionary) -> void:
 		show_all = false
 		selection_key = identity
 	row = selected
-	_refresh()
+	stale = not draw
+	if draw: _refresh()
+
+func draw_if_stale() -> void:
+	if stale and not pending_rows:
+		stale = false
+		_refresh()
 
 func go_to_section(key: String) -> void:
 	var focus := get_viewport().gui_get_focus_owner()
@@ -145,6 +179,7 @@ func go_to_section(key: String) -> void:
 	layout.page_scroll.scroll_vertical = 0
 
 func _refresh() -> void:
+	stale = false
 	AuthoringLayout.clear(body)
 	AuthoringLayout.clear(layout.sheet)
 	if row.is_empty() or row.def.type == "file":
@@ -160,13 +195,15 @@ func _refresh() -> void:
 	if d.type == "event":
 		sections.append_array([{"key": "when", "title": "When & where"}, {"key": "conditions", "title": "Conditions"}])
 	if d.type == "condition": sections.append({"key": "bonuses", "title": "Temporary bonuses"})
-	if d.type == "item": sections.append({"key": "use", "title": "Use & reactions"})
+	if d.type == "item": sections.append_array([{"key": "use", "title": "Use & reactions"}, {"key": "gear", "title": "Wearing & fighting"}])
+	if d.type == "form": sections.append({"key": "body", "title": "Body"})
+	if d.type == "character": sections.append({"key": "body", "title": "Body & stats"})
 	sections.append_array([{"key": "stories", "title": "Stories"}, {"key": "settings", "title": "Settings"}, {"key": "properties", "title": "Properties"}])
 	layout.set_sections(sections, section)
 	_build_summary()
-	var titles := {"overview": "The essentials", "when": "When does it happen?", "conditions": "What needs to be true?", "stories": "Write what happens", "settings": "Other settings", "properties": "What can this content do?", "use": "When the player uses this item", "bonuses": "What changes while this is active?"}
+	var titles := {"overview": "The essentials", "gear": "Wearing it and fighting with it", "body": "The body", "when": "When does it happen?", "conditions": "What needs to be true?", "stories": "Write what happens", "settings": "Other settings", "properties": "What can this content do?", "use": "When the player uses this item", "bonuses": "What changes while this is active?"}
 	body.add_child(AuthoringLayout.label(titles.get(section, "Details"), 24))
-	var hints := {"overview": "Start with the basics, then choose a section above.", "when": "Choose how the player finds this event and where it can happen.", "conditions": "Choose requirements and how often this event can run.", "stories": "Choose an interaction to write. Existing passages stay connected to this content.", "settings": "Adjust the settings already used by this content.", "properties": "Browse every available property, including ones already in use. Choose one to see what it does.", "use": "Write the use story, choose reactions and decide whether the item is used up."}
+	var hints := {"overview": "Start with the basics, then choose a section above.", "gear": "Dimmed settings are not written: the game uses what they show. Change one to set it; × takes it out again.", "body": "Dimmed settings are not written: the game uses what they show. Change one to set it; × takes it out again.", "when": "Choose how the player finds this event and where it can happen.", "conditions": "Choose requirements and how often this event can run.", "stories": "Choose an interaction to write. Existing passages stay connected to this content.", "settings": "Adjust the settings already used by this content.", "properties": "Browse every available property, including ones already in use. Choose one to see what it does.", "use": "Write the use story, choose reactions and decide whether the item is used up."}
 	_event_note(hints.get(section, ""))
 	var basics: Array[String] = []
 	var settings: Array[String] = []
@@ -188,7 +225,12 @@ func _refresh() -> void:
 			if d.type == "condition":
 				destinations.push_front(["Temporary bonuses", "Change attributes, then apply this condition from a story or item for a chosen duration.", "bonuses"])
 			if d.type == "item":
+				destinations.push_front(["Wearing & fighting", "Make it clothing, armour or a weapon.", "gear"])
 				destinations.push_front(["Use & reactions", "Set healing, food effects, mutation and whether this item is used up.", "use"])
+			if d.type == "form":
+				destinations.push_front(["Body", "What each part looks like, the text when it changes, and sizes.", "body"])
+			if d.type == "character":
+				destinations.push_front(["Body & stats", "The character's body, numbers and standing with the player.", "body"])
 			if d.type == "event":
 				destinations.push_front(["When & where", EventTriggers.describe(workspace, row.doc.field_value(d, "found by")), "when"])
 			for entry: Array in destinations:
@@ -203,6 +245,15 @@ func _refresh() -> void:
 		"properties": _add_property_catalog(schema)
 		"use": _add_item_use()
 		"bonuses": _add_bonus_flow()
+		"gear": _add_sheets([["equipment", "Worn", "Set where it is worn to make this something the player can put on."], ["weapon", "Weapon", "Set its damage to make this something the player can fight with."]])
+		"body":
+			if d.type == "form":
+				_add_section("", ["sex", "sex by preference", "scale", "body type", "descriptor"] as Array[String], schema)
+				var parts: Array = []
+				for part: String in BodySystem.PARTS + ["breasts", "balls"]: parts.append([part, part.capitalize(), ""])
+				_add_sheets(parts)
+			else:
+				_add_sheets([["body", "Body", "The body the character has. What is not set starts at nothing."], ["stats", "Numbers", "Level, health and attributes, and any other number the game keeps for a character."], ["relationship", "With the player", "How things stand between the character and the player when the game starts."], ["companion", "Following the player", "Set one of these to let the character follow the player as a companion."]])
 
 func _add_bonus_flow() -> void:
 	_event_note("These attribute changes last until the condition expires. Choose the duration when applying it from a story or item.")
@@ -367,7 +418,7 @@ func _add_item_steps(nodes: Array, depth: int = 0) -> void:
 			remove.text = "Remove"
 			remove.disabled = not row.doc.writable
 			remove.pressed.connect(func() -> void:
-				var current := _current_row()
+				var current := _current_row().duplicate()
 				if current.is_empty(): return
 				current.script_field = "use"
 				var error := StoryGraph.set_effect(current, node, "")
@@ -564,11 +615,15 @@ func _add_section(title: String, keys: Array[String], schema: Dictionary) -> voi
 	for key: String in keys:
 		_add_field(key, str(schema[key]))
 
+## A field's name as a heading: "sex by preference" reads "Sex by preference".
+static func _caption(key: String) -> String:
+	return key.left(1).to_upper() + key.substr(1)
+
 func _add_field(key: String, kind: String) -> void:
 	var d: FscParser.Definition = row.def
 	var doc: PackDocument = row.doc
 	var caption := Label.new()
-	caption.text = {"play": "Story", "requires": "Only if", "repeat": "Can happen", "chance": "Arrival chance (%)", "cooldown": "Arrival cooldown (turns)", "priority": "Priority (lower first)"}.get(key, key.capitalize()) if d.type == "event" else key.capitalize()
+	caption.text = {"play": "Story", "requires": "Only if", "repeat": "Can happen", "chance": "Arrival chance (%)", "cooldown": "Arrival cooldown (turns)", "priority": "Priority (lower first)"}.get(key, _caption(key)) if d.type == "event" else _caption(key)
 	if d.type == "item": caption.text = AuthoringCatalog.property(d.type, key, kind).title
 	caption.add_theme_font_size_override("font_size", 13)
 	body.add_child(caption)
@@ -611,6 +666,58 @@ func _add_field(key: String, kind: String) -> void:
 			if not name.is_empty(): _set_value(key, name))
 		body.add_child(stage)
 		return
+	if d.type == "creature" and key == "loot" and (value.is_empty() or _read_loot(value).size() == 2):
+		_add_loot_field(key, value)
+		return
+	if d.type == "door" and key == "locked" and (field == null or field.children.is_empty()) and (value in ["", "yes", "no"] or not Condition.compile(value).has("error")):
+		_add_lock_field(key, value)
+		return
+	if key == "stages" and d.type in ["quest", "meter"]:
+		var steps := StageRows.read(doc, field, d.type == "meter")
+		if steps.ok:
+			var stages := StageRows.new()
+			stages.configure(workspace, steps.entries, doc.writable, d.type == "meter")
+			stages.problem.connect(func(message: String) -> void: problem.emit(message))
+			stages.edited.connect(func(text: String) -> void:
+				if text.is_empty(): _clear_nested(key)
+				else: _set_value(key, text, true))
+			body.add_child(stages)
+			return
+	if key in FORMULA_FIELDS.get(d.type, []) and (field == null or field.children.is_empty()):
+		_add_formula_field(key, value)
+		return
+	if key in CHANCE_FIELDS.get(d.type, []) and (value.is_empty() or _read_chance(value).size() == 2):
+		_add_chance_field(key, value)
+		return
+	if d.type == "shop" and key in ["stock", "buys"]:
+		var listed := PriceRows.read(doc, field)
+		if listed.ok:
+			var prices := PriceRows.new()
+			prices.configure(workspace, listed.entries, doc.writable, StoryBlocks.contexts(row))
+			prices.edited.connect(func(text: String) -> void:
+				if text.is_empty(): _clear_nested(key)
+				else: _set_value(key, text, true))
+			body.add_child(prices)
+			return
+	if d.type in ["shop", "status_bar"] and key == "currency" and (value.is_empty() or not value.begins_with("item ") or workspace.preview_content().has(value.trim_prefix("item ").strip_edges(), "item")):
+		_add_currency_field(key, value)
+		return
+	if kind == "fields" and key.ends_with(" modifiers"):
+		var adjustments := ModifierRows.read(doc, field)
+		if adjustments.ok:
+			var rules := ModifierRows.new()
+			rules.configure(workspace, adjustments.entries, doc.writable, StoryBlocks.contexts(row), caption.text)
+			rules.problem.connect(func(message: String) -> void: problem.emit(message))
+			rules.edited.connect(func(text: String) -> void:
+				if text.is_empty(): _clear_nested(key)
+				else: _set_value(key, text, true))
+			body.add_child(rules)
+			return
+	if kind == "fields" and SettingsSheet.has_sheet(d.type, key):
+		var held := SettingsSheet.read(doc, field)
+		if held.ok:
+			_add_sheet(key, held.entries)
+			return
 	if key == "stats" and (field == null or field.children.is_empty()) and (value.is_empty() or not _read_stats(value).is_empty()):
 		_add_stats_field(key, value)
 		return
@@ -869,7 +976,21 @@ func _add_stats_field(key: String, value: String) -> void:
 
 ## Fields that hold a condition: "when", "requires" and everything ending in "when".
 static func is_condition_field(type: String, key: String) -> bool:
-	return key == "when" or key.ends_with(" when") or (key == "requires" and type != "event")
+	return key == "when" or key.ends_with(" when") or key.ends_with(" while") or (key == "requires" and type != "event")
+
+## Opens the condition builder for a field; what is built is written to it.
+func _ask_condition(key: String, value: String, heading: String, may_be_empty: bool) -> void:
+	if condition_editor == null:
+		condition_editor = ConditionDialog.new()
+		add_child(condition_editor)
+		condition_editor.applied.connect(func(text: String) -> void:
+			if text.is_empty(): _clear_item_field(condition_key)
+			else:
+				_set_value(condition_key, text)
+				var current := _current_row()
+				if not current.is_empty(): workspace.require_condition(Condition.compile(text)))
+	condition_key = key
+	condition_editor.open(workspace, value, StoryBlocks.contexts(row), row.def.id if row.def.type == "event" else "", heading, may_be_empty)
 
 ## A condition shown in words, changed with the condition builder.
 func _add_condition_field(key: String, value: String) -> void:
@@ -884,17 +1005,7 @@ func _add_condition_field(key: String, value: String) -> void:
 	change.text = "Change…" if not value.is_empty() else "Set a condition…"
 	change.disabled = not writable
 	change.pressed.connect(func() -> void:
-		if condition_editor == null:
-			condition_editor = ConditionDialog.new()
-			add_child(condition_editor)
-			condition_editor.applied.connect(func(text: String) -> void:
-				if text.is_empty(): _clear_item_field(condition_key)
-				else:
-					_set_value(condition_key, text)
-					var current := _current_row()
-					if not current.is_empty(): workspace.require_condition(Condition.compile(text)))
-		condition_key = key
-		condition_editor.open(workspace, value, StoryBlocks.contexts(row), row.def.id if row.def.type == "event" else "", AuthoringCatalog.property(row.def.type, key, "text").title, true))
+		_ask_condition(key, value, AuthoringCatalog.property(row.def.type, key, "text").title, true))
 	line.add_child(change)
 	if not value.is_empty():
 		var clear := Button.new()
@@ -902,6 +1013,237 @@ func _add_condition_field(key: String, value: String) -> void:
 		clear.disabled = not writable
 		clear.pressed.connect(func() -> void: _clear_item_field(key))
 		line.add_child(clear)
+
+## Named settings on indented lines (equipment, a weapon, a body part), each
+## with its own control. Every change is saved at once, as one undo step.
+func _add_sheet(key: String, entries: Array[Dictionary]) -> void:
+	var sheet := SettingsSheet.new()
+	sheet.configure(workspace, row.def.type, key, entries, row.doc.writable, StoryBlocks.contexts(row))
+	sheet.edited.connect(func(text: String) -> void:
+		if text.is_empty(): _clear_nested(key)
+		else: _set_value(key, text, true))
+	body.add_child(sheet)
+
+## "item 70%": what a creature drops, and how often.
+static func _read_loot(value: String) -> Array:
+	var found := RegEx.create_from_string("^([a-z0-9_]+) (\\d{1,3})%$").search(value.strip_edges())
+	return [found.get_string(1), int(found.get_string(2))] if found != null else []
+
+func _add_loot_field(key: String, value: String) -> void:
+	var loot := _read_loot(value)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var item := SlotControl.make(workspace, {"name": "item", "kind": "item", "optional": true}, loot[0] if not loot.is_empty() else "")
+	line.add_child(item)
+	line.add_child(AuthoringLayout.label("in", 14, true))
+	var chance := SpinBox.new()
+	chance.min_value = 1
+	chance.max_value = 100
+	chance.suffix = "% of wins"
+	chance.set_value_no_signal(int(loot[1]) if not loot.is_empty() else 50)
+	chance.editable = row.doc.writable and not loot.is_empty()
+	chance.tooltip_text = "How often the creature drops it when the player wins."
+	line.add_child(chance)
+	if not row.doc.writable:
+		for button: Node in item.find_children("*", "BaseButton", true, false): (button as BaseButton).disabled = true
+		return
+	item.edited.connect(func() -> void:
+		if item.value().is_empty(): _clear_item_field(key)
+		else: _set_value(key, "%s %d%%" % [item.value(), int(chance.value)]))
+	chance.value_changed.connect(func(next: float) -> void:
+		if not item.value().is_empty(): _set_value(key, "%s %d%%" % [item.value(), int(next)]))
+	if not loot.is_empty():
+		var clear := IconButton.new()
+		clear.text = "×"
+		clear.tooltip_text = "No loot"
+		clear.pressed.connect(func() -> void: _clear_item_field(key))
+		line.add_child(clear)
+
+## A number box for a plain number; a calculation is written out and checked
+## by the engine before it is kept.
+func _add_formula_field(key: String, value: String) -> void:
+	var writable: bool = row.doc.writable
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var plain := value.is_empty() or value.is_valid_int()
+	var number := SpinBox.new()
+	number.min_value = -1000000
+	number.max_value = 1000000
+	number.set_value_no_signal(int(value))
+	number.editable = writable
+	number.visible = plain
+	if value.is_empty(): number.modulate.a = 0.6
+	number.value_changed.connect(func(next: float) -> void: _set_value(key, str(int(next))))
+	line.add_child(number)
+	var formula := LineEdit.new()
+	formula.text = value
+	formula.editable = writable
+	formula.visible = not plain
+	formula.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	formula.placeholder_text = "A calculation, such as player.level * 2"
+	formula.tooltip_text = "A calculation with numbers, + - * / and values such as player.level."
+	var keep := func() -> void:
+		if not is_instance_valid(formula) or not formula.editable or not formula.visible: return
+		var next := formula.text.strip_edges()
+		if next.is_empty() or next == value: return
+		var parsed: Dictionary = Expr.parse(next)
+		if parsed.has("error"):
+			problem.emit("That calculation cannot be read: %s" % parsed.error)
+			formula.text = value
+		else: _set_value(key, next)
+	formula.text_submitted.connect(func(_text: String) -> void: keep.call())
+	formula.focus_exited.connect(keep)
+	line.add_child(formula)
+	if value.is_empty(): line.add_child(AuthoringLayout.label("not set", 13, true))
+	if writable and plain:
+		var calculate := Button.new()
+		calculate.text = "Calculate…"
+		calculate.tooltip_text = "Write a calculation in place of a plain number."
+		calculate.pressed.connect(func() -> void:
+			number.hide()
+			calculate.hide()
+			formula.show()
+			formula.grab_focus())
+		line.add_child(calculate)
+
+## "1 in 3": how many times out of how many.
+static func _read_chance(value: String) -> Array:
+	var found := RegEx.create_from_string("^(\\d+) in ([1-9]\\d*)$").search(value.strip_edges())
+	return [int(found.get_string(1)), int(found.get_string(2))] if found != null else []
+
+func _add_chance_field(key: String, value: String) -> void:
+	var chance := _read_chance(value)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var times := SpinBox.new()
+	var out_of := SpinBox.new()
+	for box: SpinBox in [times, out_of]:
+		box.max_value = 100000
+		box.editable = row.doc.writable
+		if chance.is_empty(): box.modulate.a = 0.6
+	out_of.min_value = 1
+	times.set_value_no_signal(chance[0] if not chance.is_empty() else 1)
+	out_of.set_value_no_signal(chance[1] if not chance.is_empty() else 2)
+	times.tooltip_text = "How many times…"
+	out_of.tooltip_text = "…out of this many."
+	var write := func(_next: float) -> void: _set_value(key, "%d in %d" % [int(times.value), int(out_of.value)])
+	times.value_changed.connect(write)
+	out_of.value_changed.connect(write)
+	line.add_child(times)
+	line.add_child(AuthoringLayout.label("in", 14, true))
+	line.add_child(out_of)
+	if chance.is_empty(): line.add_child(AuthoringLayout.label("not set", 13, true))
+	elif row.doc.writable:
+		var clear := IconButton.new()
+		clear.text = "×"
+		clear.tooltip_text = "Take this chance out"
+		clear.pressed.connect(func() -> void: _clear_item_field(key))
+		line.add_child(clear)
+
+## What a shop is paid in: one of the player's numbers, or an item.
+func _add_currency_field(key: String, value: String) -> void:
+	var writable: bool = row.doc.writable
+	var with_item := value.begins_with("item ")
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var kind := OptionButton.new()
+	for words: String in ["The game's own money" if row.def.type == "shop" else "No money", "A number the player has", "An item"]: kind.add_item(words)
+	kind.select(2 if with_item else 1 if not value.is_empty() else 0)
+	kind.disabled = not writable
+	line.add_child(kind)
+	if with_item:
+		var item := SlotControl.make(workspace, {"name": "item", "kind": "item", "optional": false}, value.trim_prefix("item ").strip_edges())
+		item.edited.connect(func() -> void:
+			if not item.value().is_empty(): _set_value(key, "item " + item.value()))
+		if not writable:
+			for button: Node in item.find_children("*", "BaseButton", true, false): (button as BaseButton).disabled = true
+		line.add_child(item)
+	var number := LineEdit.new()
+	number.text = value if not with_item else ""
+	number.editable = writable
+	number.visible = not with_item and not value.is_empty()
+	number.custom_minimum_size.x = 200
+	number.placeholder_text = "Its name, such as coins"
+	number.tooltip_text = "The name of a number the player has, without “player.” in front."
+	number.text_submitted.connect(func(next: String) -> void:
+		if not next.strip_edges().is_empty(): _set_value(key, next.strip_edges()))
+	number.focus_exited.connect(func() -> void:
+		if is_instance_valid(number) and number.editable and not number.text.strip_edges().is_empty(): _set_value(key, number.text.strip_edges()))
+	line.add_child(number)
+	kind.item_selected.connect(func(index: int) -> void:
+		if index == 0: _clear_item_field(key)
+		elif index == 1:
+			# Nothing is written until the number is named.
+			number.show()
+			number.grab_focus()
+		elif not with_item:
+			var items: Array = workspace.rows.filter(func(candidate: Dictionary) -> bool: return candidate.def.type == "item" and candidate.def.mode != "extend")
+			if items.is_empty(): problem.emit("Make an item first: there is none to pay with yet.")
+			else: _set_value(key, "item " + str(items[0].def.id)))
+
+## A door: open, locked, or locked while a condition holds.
+func _add_lock_field(key: String, value: String) -> void:
+	var writable: bool = row.doc.writable
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var state := OptionButton.new()
+	for words: String in ["Not locked", "Locked", "Locked while…"]: state.add_item(words)
+	var conditional: bool = value not in ["", "yes", "no"]
+	state.select(2 if conditional else 1 if value == "yes" else 0)
+	state.disabled = not writable
+	line.add_child(state)
+	var ask := func() -> void:
+		_ask_condition(key, value if conditional else "", "Locked while…", false)
+	state.item_selected.connect(func(index: int) -> void:
+		if index == 2: ask.call()
+		elif index == 1: _set_value(key, "yes")
+		elif value == "no" or value.is_empty(): return
+		else: _set_value(key, "no"))
+	if conditional:
+		var words := AuthoringLayout.label(BlockCatalog.condition_sentence(value, workspace), 14)
+		words.theme_type_variation = "AccentLabel"
+		words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		line.add_child(words)
+		var change := Button.new()
+		change.text = "Change…"
+		change.disabled = not writable
+		change.pressed.connect(ask)
+		line.add_child(change)
+
+## Several fields of named settings under each other, each with a heading.
+func _add_sheets(fields: Array) -> void:
+	var schema: Dictionary = ContentDB.SCHEMA.get(row.def.type, {})
+	for entry: Array in fields:
+		if not schema.has(entry[0]): continue
+		body.add_child(HSeparator.new())
+		body.add_child(AuthoringLayout.label(entry[1], 18))
+		if not str(entry[2]).is_empty(): _event_note(entry[2])
+		var from := body.get_child_count()
+		_add_field(entry[0], "fields")
+		# The heading above says what it is: the field's own small caption is not needed.
+		if body.get_child_count() > from and body.get_child(from) is Label: body.get_child(from).hide()
+
+## Takes out a field together with its indented lines.
+func _clear_nested(key: String) -> void:
+	var current := _current_row()
+	if current.is_empty() or not current.doc.writable: return
+	var field: FscParser.Field = current.def.fields.get(key)
+	if field == null: return
+	var doc: PackDocument = current.doc
+	var offsets := doc.offsets()
+	var last: int = field.line
+	for child: FscParser.Line in field.children:
+		if not child.is_blank(): last = child.number
+	var begin: int = offsets[field.line - 1]
+	var end: int = offsets[last] if last < offsets.size() else doc.text.length()
+	doc.change(doc.text.left(begin) + doc.text.substr(end))
+	workspace.reindex()
+	changed.emit(_current_row())
 
 ## A list of short words as chips, with suggestions from the loaded packs.
 func _add_chip_field(key: String, value: String) -> void:
