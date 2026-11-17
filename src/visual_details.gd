@@ -13,7 +13,7 @@ const REFERENCES := {
 	"form": ["form"], "purified": ["item"], "image": ["image"], "logo": ["image"], "background": ["image"],
 	"run by": ["character"], "found in": ["zone"], "items": ["item"], "at": ["location"],
 	"trades for": ["item"], "generic": ["event"], "leads to zone": ["zone"], "milk item": ["item"], "cum item": ["item"],
-	"cross infection": ["form"]
+	"cross infection": ["form"], "heat": ["heat"], "loading": ["image"], "condition": ["condition"], "sire anal tag": ["tag"]
 }
 const PRIMARY_FIELDS := ["name", "description", "pronouns", "image", "lives at", "found by", "repeat", "requires", "chance", "cooldown", "priority", "category", "weight", "level", "hp", "damage", "zone", "start"]
 const SWITCH_FIELDS := {
@@ -26,25 +26,33 @@ const SWITCH_FIELDS := {
 	"shop": ["trades"],
 	"heat": ["female", "mpreg"],
 	"interest": ["default"],
-	"form": ["sex by preference"]
+	"form": ["sex by preference"],
+	"location": ["microwave"]
 }
 const CHOICE_FIELDS := {
 	"event": {"repeat": ["once", "until resolved", "always"]},
 	"form": {"sex": ["male", "female", "herm"]},
 	"item": {"category": ["food", "drink", "medical", "weapon", "clothing", "collectible", "other"]},
-	"creature": {"active": ["always", "day", "night"], "gender": Validator.CREATURE_GENDERS, "strike with": CombatSystem.ATTRIBUTES},
+	"creature": {"active": ["always", "day", "night"], "gender": Validator.CREATURE_GENDERS, "strike with": CombatSystem.ATTRIBUTES, "pick variant": ["random", "in order"]},
+	"pack": {"art": ["replaces", "fallback"]},
+	"menu": {"sort": ["by name"]},
 	"character": {"pronouns": ["he", "she", "they", "it", "by body"]}
 }
 const NUMBER_FIELDS := {
 	"item": ["weight"],
 	"event": ["priority", "cooldown", "level", "min score"],
 	"creature": ["level", "hp", "damage", "libido", "hit bonus", "dodge bonus", "mind bonus"],
-	"feat": ["exploration bonus", "encounter bonus", "scavenge bonus"],
+	"feat": ["exploration bonus", "encounter bonus", "scavenge bonus", "loot bonus", "carry bonus"],
+	"help": ["order"],
+	"notes_rules": ["longest"],
+	"pack": ["loading frames"],
+	"region": ["travel order"],
 	"game_mode": ["exploration bonus", "encounter bonus", "scavenge bonus", "carry bonus", "loot bonus"],
 	"meter": ["decay", "limit"],
 	"captivity": ["climax at"],
 	"scavenge_rules": ["target"],
-	"survival_rules": ["starving hint at", "journal hint below", "anticipation within"],
+	"survival_rules": ["starving hint at", "journal hint below", "anticipation within", "rescue after"],
+	"pregnancy_rules": ["most children"],
 	"combat_rules": ["unarmed damage"],
 	"heat": ["cycle", "duration"],
 	"rest_rules": ["duration", "fresh below", "fresh fatigue", "exhausted recovery", "hammock fresh fatigue", "hammock recovery", "collapse at", "collapse fatigue", "collapse turns"],
@@ -59,7 +67,7 @@ const FORMULA_FIELDS := {
 	"vore_rules": ["vore chance", "vore chance out of", "unbirth chance", "unbirth chance out of", "absorb above"],
 	"hunt_rules": ["target weight"],
 	"level_rules": ["xp needed"],
-	"combat_rules": ["level limit"]
+	"combat_rules": ["level limit", "hump lust"]
 }
 ## Chances written "N in M".
 const CHANCE_FIELDS := {
@@ -68,10 +76,36 @@ const CHANCE_FIELDS := {
 	"combat_rules": ["creature chance"],
 	"heat_rules": ["intense lengthens", "intense quickens"],
 	"pregnancy_rules": ["odds", "self odds", "sire odds", "albino", "melanism"],
-	"rest_rules": ["interruption chance"]
+	"rest_rules": ["interruption chance"],
+	"scavenge_rules": ["generic chance"]
 }
+## Spans written "N to M" (a number of turns somewhere between the two).
+const RANGE_FIELDS := {
+	"pregnancy_rules": ["gestation", "sire turns"],
+	"vore_rules": ["unbirth gestation"]
+}
+## Words the player reads, written in a roomy text box (with markup).
+const MESSAGE_FIELDS := {
+	"collection": ["empty", "gained", "lost"],
+	"combat_rules": ["unarmed attack", "player hits", "flee", "flee fails"],
+	"notes_rules": ["missing", "write", "browse", "none", "date", "crossed out", "torn out"],
+	"pack": ["start notice", "start notice title"],
+	"scavenge_rules": ["found", "failure", "only at"],
+	"storage": ["stash", "stash all", "retrieve", "retrieve all", "stash everything", "retrieve everything", "kept", "in use", "empty", "pack empty"],
+	"survival_rules": ["morale normalized", "humanity loss", "rescue anticipation"]
+}
+## One word that groups or names a kind; the words other content uses are offered beside the box.
+const WORD_FIELDS := {
+	"feat": ["group"], "interest": ["group"], "ending": ["type"], "creature": ["special"],
+	"item": ["rest", "icon"], "location": ["rest"], "collection": ["of"], "pack": ["feedback webhook"], "status_bar": ["start date", "sheet"],
+	"event": ["blocks"], "level": ["default", "from"], "heat_rules": ["default"], "filter": ["group", "from"], "tag": ["group", "from"]
+}
+## A saved value, chosen from the values the packs declare.
+const VALUE_FIELDS := {"meter": ["value"], "combat_rules": ["auto action"]}
+## Two numbers with something between them: a place on the map ("5, 7"), a grid's size ("12 x 12").
+const POINT_FIELDS := {"location": {"map": [", ", "Across", "Down"]}, "region": {"map grid": [" x ", "Wide", "High"]}}
 ## Lists of short words shown as chips; the value names where suggestions come from.
-const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": "", "outcomes": ""}
+const CHIP_FIELDS := {"tags": "tag", "gift tags": "tag", "flags": "place_flag", "aliases": "", "outcomes": "", "personalities": "", "genders": "", "meters": "", "menu icons": "", "choices": "", "extra children": "", "currency names": ""}
 
 var workspace: PackWorkspace
 var row: Dictionary = {}
@@ -702,6 +736,48 @@ func _add_field(key: String, kind: String) -> void:
 	if d.type in ["shop", "status_bar"] and key == "currency" and (value.is_empty() or not value.begins_with("item ") or workspace.preview_content().has(value.trim_prefix("item ").strip_edges(), "item")):
 		_add_currency_field(key, value)
 		return
+	if PairRows.has_rows(d.type, key):
+		var rules: Dictionary = PairRows.SPECS[d.type + "/" + key]
+		var pairs := PairRows.read(doc, field, rules)
+		if pairs.ok:
+			var table := PairRows.new()
+			table.configure(workspace, pairs.entries, doc.writable, rules, StoryBlocks.contexts(row))
+			table.edited.connect(func(text: String) -> void:
+				if text.is_empty(): _clear_nested(key)
+				else: _set_value(key, text, not rules.get("inline", false)))
+			body.add_child(table)
+			return
+	if key in VALUE_FIELDS.get(d.type, []) and (field == null or field.children.is_empty()):
+		var held := SlotControl.make(workspace, {"name": key, "kind": "value", "default": "", "hidden": false, "optional": false}, value)
+		held.picker.disabled = not doc.writable
+		held.edited.connect(func() -> void:
+			if not held.value().is_empty(): _set_value(key, held.value()))
+		body.add_child(held)
+		return
+	if POINT_FIELDS.get(d.type, {}).has(key):
+		var shape: Array = POINT_FIELDS[d.type][key]
+		var parts := value.split(str(shape[0]))
+		if value.is_empty() or (parts.size() == 2 and parts[0].strip_edges().is_valid_int() and parts[1].strip_edges().is_valid_int()):
+			var line := HBoxContainer.new()
+			line.add_theme_constant_override("separation", 8)
+			body.add_child(line)
+			var boxes: Array[SpinBox] = []
+			for index in 2:
+				line.add_child(AuthoringLayout.label(str(shape[index + 1]), 13, true))
+				var box := SpinBox.new()
+				box.min_value = -1000
+				box.max_value = 1000
+				box.value = float(parts[index]) if parts.size() == 2 else 0.0
+				box.editable = doc.writable
+				line.get_child(-1).autowrap_mode = TextServer.AUTOWRAP_OFF
+				line.add_child(box)
+				boxes.append(box)
+			for box: SpinBox in boxes: box.value_changed.connect(func(_number: float) -> void: _set_value(key, "%d%s%d" % [int(boxes[0].value), shape[0], int(boxes[1].value)]))
+			if value.is_empty(): line.add_child(AuthoringLayout.label("Not set: the game places it by itself.", 13, true))
+			return
+	if key in RANGE_FIELDS.get(d.type, []) and (value.is_empty() or _read_range(value).size() == 2):
+		_add_range_field(key, value)
+		return
 	if kind == "fields" and key.ends_with(" modifiers"):
 		var adjustments := ModifierRows.read(doc, field)
 		if adjustments.ok:
@@ -830,7 +906,7 @@ func _add_field(key: String, kind: String) -> void:
 	if kind in ["fields", "values", "stages", "effects"]:
 		_add_rows(key, kind)
 		return
-	if (field != null and not field.children.is_empty()) or (kind == "text" and key in ["description", "about"]):
+	if (field != null and not field.children.is_empty()) or (kind == "text" and key in ["description", "about"]) or key in MESSAGE_FIELDS.get(d.type, []):
 		var long_text := TextEdit.new()
 		long_text.custom_minimum_size.y = 85
 		long_text.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
@@ -886,7 +962,9 @@ func _add_field(key: String, kind: String) -> void:
 		choose.pressed.connect(_open_reference.bind(key))
 		line.add_child(choose)
 
-const MOMENT_WORDS := {"each turn": "Every turn", "day starts": "When day starts", "night starts": "When night starts", "captivity starts": "When a captivity starts", "captivity round": "Each round of a captivity", "after sex": "After sex", "player hits": "When the player hits in a fight", "after resting": "After resting", "instead of resting": "Instead of resting", "game starts": "When the game starts", "while travelling": "While travelling", "instead of talking to ": "Instead of talking to…", "instead of sex with ": "Instead of sex with…", "after using ": "After using the item…"}
+const MOMENT_WORDS := {"each turn": "Every turn", "day starts": "When day starts", "night starts": "When night starts", "captivity starts": "When a captivity starts", "captivity round": "Each round of a captivity", "after sex": "After sex", "player hits": "When the player hits in a fight", "after resting": "After resting", "instead of resting": "Instead of resting", "game starts": "When the game starts", "while travelling": "While travelling", "instead of talking to ": "Instead of talking to…", "instead of sex with ": "Instead of sex with…", "after using ": "After using the item…",
+	"infection": "Whenever the player is infected", "player's turn": "At the player's turn in a fight", "after import": "After earlier progress is imported", "arriving": "When the player arrives at a place",
+	"after taking trophy ": "After taking the trophy…", "after picking up ": "After picking up the item…", "instead of using ": "Instead of using the item…", "before picking up ": "Before picking up the item…"}
 
 ## When a hook runs: one of the engine's moments, some about one character or item.
 func _add_hook_moment(value: String) -> void:
@@ -901,9 +979,41 @@ func _add_hook_moment(value: String) -> void:
 	list.add_item("Choose when this happens…")
 	list.set_item_disabled(0, true)
 	for moment: String in moments: list.add_item(MOMENT_WORDS.get(moment, moment.capitalize()))
-	list.select(moments.find(current) + 1)
+	# Two more, not in the engine's list: a share of the enemy's health, and a moment a story raises.
+	var below: String = FightActionSystem.BELOW_MOMENT
+	list.add_item("When the enemy's health falls below…")
+	list.add_item("At a moment a story raises…")
+	var own_moment: bool = current.is_empty() and not value.is_empty() and not value.begins_with(below)
+	list.select(moments.size() + 1 if value.begins_with(below) else moments.size() + 2 if own_moment else moments.find(current) + 1)
 	list.disabled = not writable
 	line.add_child(list)
+	var share := SpinBox.new()
+	share.min_value = 1
+	share.max_value = 99
+	share.suffix = "%"
+	share.value = float(value.substr(below.length()).trim_suffix("%")) if value.begins_with(below) else 50.0
+	share.visible = value.begins_with(below)
+	share.editable = writable
+	share.tooltip_text = "The hook plays once in a fight, when the enemy's health first falls below this share."
+	share.value_changed.connect(func(number: float) -> void: _set_value("on", below + str(int(number)) + "%"))
+	line.add_child(share)
+	var raised := PickerButton.new()
+	raised.placeholder = "Choose or name the moment…"
+	raised.text = raised.placeholder
+	raised.workspace = workspace
+	raised.allow_typing = true
+	raised.visible = own_moment
+	raised.disabled = not writable
+	raised.tooltip_text = "A story raises a moment with the action “Raise the moment…”. This hook then plays right there."
+	raised.options = func() -> Array:
+		var result: Array = []
+		for word: String in workspace.known_words("moment"):
+			if word not in moments: result.append({"value": word, "label": word.replace("_", " ")})
+		return result
+	if own_moment: raised.set_value(value)
+	raised.picked.connect(func(name: String) -> void:
+		if not name.strip_edges().is_empty(): _set_value("on", name.strip_edges().to_lower()))
+	line.add_child(raised)
 	var about := value.substr(current.length()) if current.ends_with(" ") else ""
 	# Shared by the two controls: a lambda keeps its own copy of plain values.
 	var state := {"moment": current, "kind": "item" if current in Game.HOOK_ITEM_MOMENTS else "character"}
@@ -921,7 +1031,16 @@ func _add_hook_moment(value: String) -> void:
 		return result
 	target.set_value(about)
 	line.add_child(target)
+	line.move_child(share, -1)
+	line.move_child(raised, -1)
 	list.item_selected.connect(func(index: int) -> void:
+		share.visible = index == moments.size() + 1
+		raised.visible = index == moments.size() + 2
+		if index > moments.size():
+			target.hide()
+			if index == moments.size() + 1: _set_value("on", below + str(int(share.value)) + "%")
+			else: raised.open()
+			return
 		var moment: String = moments[index - 1]
 		if not moment.ends_with(" "): _set_value("on", moment)
 		else:
@@ -936,7 +1055,7 @@ func _add_hook_moment(value: String) -> void:
 	target.picked.connect(func(id: String) -> void:
 		if id.is_empty(): return
 		if _set_value("on", str(state.moment) + id): workspace.require_content(str(state.kind), id))
-	if value.is_empty() or current.is_empty(): _event_note("Choose when this hook runs." if value.is_empty() else "Kept as written: " + value)
+	if value.is_empty(): _event_note("Choose when this hook runs.")
 
 ## "strength 12, dexterity 10" as {strength: 12, dexterity: 10}; empty when it is written another way.
 static func _read_stats(value: String) -> Dictionary:
@@ -976,7 +1095,7 @@ func _add_stats_field(key: String, value: String) -> void:
 
 ## Fields that hold a condition: "when", "requires" and everything ending in "when".
 static func is_condition_field(type: String, key: String) -> bool:
-	return key == "when" or key.ends_with(" when") or key.ends_with(" while") or (key == "requires" and type != "event")
+	return key == "when" or key.ends_with(" when") or key.ends_with(" while") or key.ends_with(" requires") or (key == "requires" and type != "event")
 
 ## Opens the condition builder for a field; what is built is written to it.
 func _ask_condition(key: String, value: String, heading: String, may_be_empty: bool) -> void:
@@ -1109,6 +1228,39 @@ func _add_formula_field(key: String, value: String) -> void:
 		line.add_child(calculate)
 
 ## "1 in 3": how many times out of how many.
+## "24 to 48" as [24, 48], a single number as twice itself; empty when it is written another way.
+static func _read_range(value: String) -> Array:
+	var parts := value.split(" to ")
+	if parts.size() == 1 and value.strip_edges().is_valid_int(): return [int(value), int(value)]
+	if parts.size() != 2 or not parts[0].strip_edges().is_valid_int() or not parts[1].strip_edges().is_valid_int(): return []
+	return [int(parts[0]), int(parts[1])]
+
+## A span as two number boxes: somewhere from the first to the second.
+func _add_range_field(key: String, value: String) -> void:
+	var span := _read_range(value)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	body.add_child(line)
+	var boxes: Array[SpinBox] = []
+	for index in 2:
+		var words := Label.new()
+		words.text = "From" if index == 0 else "to"
+		line.add_child(words)
+		var box := SpinBox.new()
+		box.min_value = 0
+		box.max_value = 1000000
+		box.value = float(span[index]) if span.size() == 2 else 0.0
+		box.editable = row.doc.writable
+		box.custom_minimum_size.x = 96
+		line.add_child(box)
+		boxes.append(box)
+	var keep := func(_number: float) -> void:
+		var low := int(boxes[0].value)
+		var high := maxi(low, int(boxes[1].value))
+		_set_value(key, str(low) if low == high else "%d to %d" % [low, high])
+	for box: SpinBox in boxes: box.value_changed.connect(keep)
+	if value.is_empty(): line.add_child(AuthoringLayout.label("Not set: the game uses its own span.", 13, true))
+
 static func _read_chance(value: String) -> Array:
 	var found := RegEx.create_from_string("^(\\d+) in ([1-9]\\d*)$").search(value.strip_edges())
 	return [int(found.get_string(1)), int(found.get_string(2))] if found != null else []

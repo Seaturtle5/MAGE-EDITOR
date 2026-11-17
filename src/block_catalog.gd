@@ -54,6 +54,9 @@ const CHOICES := {
 	"armor": [["ignoring armor", "ignoring armor"], ["through half armor", "through half the armor"], ["without shield", "ignoring the shield"]],
 	"player_move": [["attack enemy", "attacks the enemy"], ["try to flee", "tries to flee"]],
 	"sort": [["random", "a shuffled"], ["reverse", "reverse"]],
+	"tag_how": [["+", "gains"], ["-", "loses"]],
+	"companions": [["each tamed companion", "each tamed companion"], ["all companions", "every character that can follow the player"]],
+	"picked": [["an", "An"], ["no", "No"]],
 	"creature_gender": [["neuter", "neuter"], ["male neuter", "male neuter"], ["female neuter", "female neuter"], ["male", "male"], ["female", "female"], ["herm", "herm"], ["shemale", "shemale"], ["male herm", "male herm"], ["cuntboy", "cuntboy"], ["variable", "variable"]],
 }
 
@@ -213,6 +216,51 @@ const ACTIONS := [
 	["player_move", "Fights", "The player {move}", "{move:@player_move}", "player attack flee move", "fight"],
 	["infects_as", "Fights", "This fight infects as {creature}", "this fight infects as {creature:creature}", "fight infection strain", "fight"],
 	["no_infection", "Fights", "This fight does not infect", "this fight does not infect", "fight no infection safe", "fight"],
+	# Lists, companions, moments, collections and gear in play.
+	["list_set", "Lists", "Replace entry number {index} of the list {list} with {to}", "entry {index:expr=1} of {list:value.list} = {to:expr=1}", "list entry replace change position", "", "Puts another number or text in one place of a list. Entry 1 is the first."],
+	["tame_all", "Companions", "Every companion can now be summoned", "tame all companions", "tame all companions pets summon everyone"],
+	["each_companion", "Companions", "For each companion in the party, play {scene}", "for each companion play {scene:script}", "each every companion party play train", "", "Plays the story once for each party member, at once and without stopping for the player. In it, the companion's values are the one whose turn it is."],
+	["each_companion_of", "Companions", "For {which}, play {scene}", "for {which:@companions} play {scene:script}", "each every tamed all companions play", "", "Plays the story once for each of them, at once and without stopping for the player: responses and fights do not work in it."],
+	["moment", "Events", "Raise the moment {moment} (hooks that wait for it play here)", "moment {moment:phrase.moment}", "moment hook signal raise other packs add", "", "A moment is a named point in a story. Any pack can add a hook that plays when it is raised, so another author can add text or actions here without changing this story."],
+	["random_loot.give", "Items", "Give the player the loot of a {which} creature", "give loot of {which:random|picked} creature", "loot random creature give drop reward"],
+	["random_loot.keep", "Items", "Keep the loot of a {which} creature in {value}", "{value:value.text} = loot of {which:random|picked} creature", "loot random creature remember keep"],
+	["collect", "Items", "Add [{count} of ]{thing} to the collection {collection}", "collect [{count:expr} of ]{thing:token} in {collection:collection}", "collect collection sample add vial"],
+	["discard_everything", "Items", "Empty the collection {collection}", "discard everything from {collection:collection}", "collection empty clear discard all"],
+	["discard", "Items", "Take [{count} of ]{thing} out of the collection {collection}", "discard [{count:expr} of ]{thing:token} from {collection:collection}", "collection discard remove take out"],
+	["gear_number", "Items", "The item {item}'s {field} {how} {amount}", "item {item:item} {field:damage|hit bonus|armor|effectiveness} {how:@set_how} {amount:amount=1}", "item weapon armor damage stronger sharpen improve upgrade", "", "Changes a weapon's or armor's numbers from now on. It is saved with the game."],
+	["gear_number.held", "Items", "The item kept in {value}: its {field} {how} {amount}", "item {value:value.text} {field:damage|hit bonus|armor|effectiveness} {how:@set_how} {amount:amount=1}", "item chosen weapon armor damage improve upgrade"],
+	["ask_gear", "Ask", "Ask the player to choose a carried {kind}, kept in {value}: {prompt}", "ask {value:value.text} as {kind:weapon or armor|weapon|armor}: {prompt:text}", "ask choose weapon armor gear pick"],
+	["world:ask_creature", "Ask", "Ask the player to choose a creature they have met, kept in {value}: {prompt}", "ask {value:value.text} as creature met: {prompt:text}", "ask choose creature met shift"],
+	["world:cancel_pick_up", "Items", "The item stays on the ground (the pick-up is refused)", "cancel pick up", "cancel pick up refuse take ground", "", "For a hook that plays before an item is picked up."],
+	# Fights and creatures in play.
+	["fight:end", "Fights", "End the fight with no winner", "end fight", "end stop abort fight no winner", "fight", "The fight stops at once: no experience, loot or infection. The fight's \"ended\" part plays, else its \"fled\" part."],
+	["fight:no_second", "Fights", "The second fight does not come", "no second fight", "second fight cancel another"],
+	["fight:cancel_blow", "Fights", "This turn's blow does no damage", "cancel blow", "cancel blow damage block miss", "fight"],
+	["fight:counts_as", "Fights", "This fight counts as {result}", "this fight counts as {result:won by fighting|won by seduction|lost by injury|lost by lust|lost by submitting}", "fight result counts won lost outcome", "fight"],
+	["fight:becomes", "Fights", "The enemy becomes {creature} (a second stage)", "enemy becomes {creature:creature}", "enemy becomes second stage transform boss phase", "fight"],
+	["fight:tag.creature", "Creatures", "{creature} {how} the tags {tags}", "creature {creature:creature} tag {how:@tag_how} {tags:ids.tag}", "creature tag add remove label"],
+	["fight:tag.creatures", "Creatures", "{creature} {how} the tags {tags}", "creature {creature:creature} tags {how:@tag_how} {tags:ids.tag}", "", "hidden"],
+	["fight:tag.form", "Body", "The body form {form} {how} the tags {tags}", "form {form:form} tag {how:@tag_how} {tags:ids.tag}", "form tag add remove label"],
+	["fight:tag.forms", "Body", "The body form {form} {how} the tags {tags}", "form {form:form} tags {how:@tag_how} {tags:ids.tag}", "", "hidden"],
+	["fight:script", "Creatures", "{creature}'s {text} text becomes the story {scene}", "creature {creature:creature} {text:attack|miss|before attack|after attack|each round} -> {scene:script}", "creature attack text change words miss round", "", "From now on the creature's text of that moment is this story. Choose \"default\" to give it its own back."],
+	["fight:loot", "Creatures", "{creature}'s chance to drop its loot {how} {amount}", "creature {creature:creature} loot chance {how:@set_how} {amount:amount=5}", "creature loot chance drop more often"],
+	["each_creature", "Creatures", "For each creature, weakest first, play {scene}", "for each creature by level play {scene:script}", "each every creature level list play"],
+	# Rest, events and places in bulk, characters renamed, shifting.
+	["rest", "Health", "The player rests: healing and sleep, no time passes", "rest", "rest sleep heal bed nap", "", "The Rest button's healing and sleep, from a story. Add \"turns pass\" if time should go by."],
+	["pick_event", "Events", "Pick a random event tagged {tag} that could be found now", "pick random event tagged {tag:word.tag}", "random event pick tagged dream kind", "", "The picked event is kept; \"An event is picked\" checks it, and playing the picked event plays it here."],
+	["resolve_tagged", "Events", "Finish every event tagged {tag}", "resolve every event tagged {tag:word.tag}", "finish resolve all events tagged"],
+	["discover_flagged", "Places", "Discover every place flagged {flag}", "discover every place flagged {flag:phrase.place_flag}", "discover reveal all places flagged map"],
+	["world:event_zones", "Events", "The event {event} is now found in {zones}", "event {event:event} found in {zones:ids.zone}", "event area zone move found elsewhere"],
+	["world:event_level", "Events", "The event {event}'s level {how} {amount}", "event {event:event} level {how:@set_how} {amount:amount=1}", "event level harder later"],
+	["world:character_name.default", "People", "{who} gets their own name back", "character {who:character} name default", "character name back original"],
+	["world:character_name", "People", "{who} is now called \"{name}\"", "character {who:character} name \"{name:quoted}\"", "character rename name call title"],
+	["world:character_text", "People", "{who}'s {text} becomes the story {scene}", "character {who:character} {text:presence|description} -> {scene:script}", "character presence description change words look", "", "From now on the character is described by this story. Choose \"default\" to give them their own back."],
+	["world:shift", "Body", "The player shifts into {creature}", "shift into {creature:creature}", "shift shapeshift change into creature form", "", "Every body part that differs takes the creature's form, each with its change text."],
+	["world:shift.held", "Body", "The player shifts into the creature kept in {value}", "shift into {value:value.text}", "shift shapeshift chosen creature"],
+	["world:transform_held", "Body", "Transform fully into the creature kept in {value}", "transform into {value:value.text}", "transform fully chosen creature form"],
+	["unborn_looks", "Pregnancy", "The unborn child looks like {strain}", "unborn child looks like {strain:token}", "unborn child baby looks strain form", "", "Sets what the child carried now will look like: a body form or creature, a text in quotes, or a value. Nothing happens when no child is carried."],
+	["unborn_looks.parts", "Pregnancy", "The unborn child's {parts} look like {strain}", "unborn child {parts:plain=head, body and tail} look like {strain:token}", "unborn child head body tail looks strain"],
+	["unborn_looks.part", "Pregnancy", "The unborn child's {parts} looks like {strain}", "unborn child {parts:plain=head} looks like {strain:token}", "", "hidden"],
 	# Endings.
 	["trigger_ending", "Endings", "Mark the ending {ending} for the end of the game", "trigger ending {ending:ending}", "ending epilogue mark later"],
 	["ending", "Endings", "End the game now with {ending}", "ending {ending:ending}", "ending game over finish epilogue"],
@@ -285,6 +333,11 @@ const CONDITIONS := [
 	["is.variant", "Creatures", "{who} {is} the variant {variant}", "{who:creature} {is:@is} variant {variant:word.variant}", "creature variant"],
 	["is", "People", "{who} {is} {what}", "{who:who} {is:@is} {what:phrase.adjective}", "is state naked pure companion tamed resolved active"],
 	["value_is", "Memory", "{value} {is} {to}", "{value:value} {is:@is} {to:expr}", "value is equal text stage mood"],
+	["gear_held", "Items", "The player {wears} the item kept in {value}", "player {wears:@wears} {value:value.text}", "wears wields chosen item weapon armor kept"],
+	["event_picked", "Events", "{which} event is picked", "{which:@picked} event is picked", "event picked random found none", "", "After \"Pick a random event tagged…\": whether one was found."],
+	["world_banned", "Creatures", "The creature {creature} {is} banned by the player's content settings", "creature {creature:creature} {is:@is} banned", "creature banned filter content settings allowed"],
+	["world_banned.held", "Creatures", "The creature kept in {value} {is} banned by the player's content settings", "creature {value:value.text} {is:@is} banned", "creature chosen banned filter"],
+	["world_has_used_up", "Items", "The player {has} an item that is used up when used", "player {has:@has} an item used up by use", "has item used up consumable carried"],
 ]
 
 static var _built: Dictionary = {}
@@ -388,6 +441,7 @@ static func _slot_regex(slot: Dictionary) -> String:
 		"script": return "[a-z0-9_.]+"
 		"father": return "random creature|\\w+"
 		"plain": return "[a-z0-9_,% ]+"
+		"token": return "\"[^\"]*\"|[a-z0-9_.]+"
 		"word.stat": return "[a-z_]+"
 	return "\\w+"
 
@@ -653,7 +707,7 @@ static func label(spec: Dictionary, value: String, workspace: PackWorkspace = nu
 		return str(spec.labels[at]) if at >= 0 else value
 	if kind.begins_with("value"): return value_label(value, workspace)
 	if kind in ["amount", "expr"]: return amount_label(value, workspace)
-	if kind in ["int", "text", "quoted", "script", "plain"] or kind.begins_with("phrase"): return value
+	if kind in ["int", "text", "quoted", "script", "plain", "token"] or kind.begins_with("phrase"): return value
 	if kind == "exprs":
 		var shown: Array[String] = []
 		for part: String in Effect._split_top(value): shown.append(amount_label(str(part), workspace))

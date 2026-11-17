@@ -42,7 +42,7 @@ func _build() -> void:
 	elif kind == "amount": _build_amount()
 	elif kind == "expr": _build_expression()
 	elif kind.begins_with("ids") or kind == "exprs": _build_list()
-	elif kind in ["text", "quoted", "plain"]: _build_text()
+	elif kind in ["text", "quoted", "plain", "token"]: _build_text()
 	else: _build_picker()
 
 func _build_switch() -> void:
@@ -183,7 +183,7 @@ func _build_text() -> void:
 	input.custom_minimum_size.x = 260
 	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var kind: String = spec.kind
-	input.placeholder_text = {"text": "Write the words the player reads", "quoted": "Write the text", "exprs": "One or more entries, with commas between", "father": "A creature or character, or: random creature"}.get(kind, "IDs with commas between" if kind.begins_with("ids") else "")
+	input.placeholder_text = {"text": "Write the words the player reads", "quoted": "Write the text", "token": "A name, or a text in \"quotes\"", "exprs": "One or more entries, with commas between", "father": "A creature or character, or: random creature"}.get(kind, "IDs with commas between" if kind.begins_with("ids") else "")
 	input.text_changed.connect(func(_text: String) -> void: edited.emit())
 	add_child(input)
 	_read = func() -> String: return input.text.strip_edges()

@@ -25,7 +25,7 @@ The editor uses the engine's own reader and checker from that checkout, without 
 | Home | Guided tasks, what you worked on with hints about what it still needs, and problems. |
 | Stories | The board: one card per story, with lines showing how they lead to each other. Select a card to see its blocks in the side editor. **Tidy up** arranges the cards. |
 | Map | Places and the ways between them. Drag from one place to another to connect them, with or without a door. Select a place to set its area (what is found while exploring) and its region, to add a door to a way, and to see what happens there. **Arrange as in the game** lays the places out as the game's own map does. |
-| Details | Everything about the selected content. Conditions read in words and open the condition builder; lists of words are chips; numbers, switches and choices have their own controls. The small buttons beside the name show where the content is used, rename it everywhere, duplicate it and delete it. |
+| Details | Everything about the selected content. Conditions read in words and open the condition builder; lists of words are chips; numbers, spans, chances, switches and choices have their own controls; settings with several parts (what an item is worn as, a body part, a creature's trophies, the warnings at each level of hunger) are sheets and rows. A hook's moment is chosen from a list, including a share of the enemy's health and a moment one of your stories raises. The small buttons beside the name show where the content is used, rename it everywhere, duplicate it and delete it. |
 | Side editor (right) | The selected story as blocks, with a preview underneath. |
 | Status line | What just happened, with **Undo**, and where you are. |
 
@@ -88,7 +88,7 @@ The game is taken from the engine checkout the editor was started with (`--engin
 
 ## Not finished
 
-- Nested settings (equipment, weapons, body parts, modifiers, shop stock, creature variants) and some settings of the rarer rules types are typed in the format's words in a text box. A small ▾ beside such a box offers the words other content of the same kind uses.
+- A creature's variants, a form's lean towards one gender for its offspring, and the rules for importing another game's saves are typed in the format's words in a text box. Every other field has its own control: a picker, number boxes, a switch, chips, a condition in words, rows, or a text box for words the player reads.
 - A calculation is typed as a short formula inside its block; lists of entries are typed with commas.
 - The map does not set travel order, map grids or hand-set map positions; a door that leads into an area is set in the door's details.
 - Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.

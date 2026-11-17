@@ -1255,6 +1255,7 @@ func _words_in(list: String, writable: bool) -> Dictionary:
 		"place_flag": pattern = RegEx.create_from_string("\\bflagged ([a-z][a-z ]*?)(?:\\]|:| and | or |$)")
 		"ending_flag": pattern = RegEx.create_from_string("\\bending flag ([a-z0-9_]+)")
 		"interest": pattern = RegEx.create_from_string("\\binterested in ([a-z_]+)")
+		"moment": pattern = RegEx.create_from_string("(?m)^\\s*(?:~ moment|on:) ([a-z0-9_]+(?: [a-z0-9_]+)*)\\s*$")
 	var source: Array = []
 	if writable:
 		for path: String in _own_rows: source.append_array(_own_rows[path].rows)
