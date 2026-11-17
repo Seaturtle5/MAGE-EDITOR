@@ -5,8 +5,6 @@ extends VBoxContainer
 signal changed(row: Dictionary)
 signal problem(message: String)
 signal story_requested(row: Dictionary, field: String)
-signal condition_requested(row: Dictionary)
-signal reaction_requested(row: Dictionary, action: Dictionary, category: String)
 
 const REFERENCES := {
 	"lives at": ["location"], "start": ["location"], "region": ["region"], "zone": ["zone"],
@@ -304,9 +302,8 @@ func _add_bonus_flow() -> void:
 	reaction.disabled = not row.doc.writable
 	reaction.pressed.connect(func() -> void:
 		if pending_rows: problem.emit("Apply or discard your bonus edits first."); return
-		var script := row.duplicate()
-		script.script_field = "each turn"
-		reaction_requested.emit(script, {}, "Health & needs"))
+		add_reaction("each turn"))
+	reaction.tooltip_text = "Something that happens on each active turn while this lasts, such as restoring 5 health. It stops when the condition ends; what it restored stays."
 	body.add_child(reaction)
 	var help := Button.new()
 	help.text = "How do I connect this to my story?"
@@ -410,7 +407,7 @@ func _add_item_use() -> void:
 	add.text = "+ Add reaction"
 	add.theme_type_variation = "PrimaryButton"
 	add.disabled = not row.doc.writable or not activity.is_empty()
-	add.pressed.connect(func() -> void: reaction_requested.emit(_item_script(), {}, "Health & needs"))
+	add.pressed.connect(func() -> void: add_reaction("use"))
 	controls.add_child(add)
 	_event_note("Reactions run in the order below. Open the story board to write text, add choices or inspect conditions.")
 	var nodes := StoryGraph.script_nodes(_item_script())
@@ -436,18 +433,67 @@ func _add_item_use() -> void:
 	_event_note("New reactions go before the first set of player responses or final story link. Branches or early returns can skip later reactions; inspect them on the story board.")
 	if not activity.is_empty(): _add_field("use action", "text")
 
+var chooser: BlockChooser
+var _chosen: Callable
+
+## Opens "What should happen?" for one of this content's stories; `then`
+## gets the line that was put together.
+func _ask_action(field: String, current: Dictionary, then: Callable) -> void:
+	if chooser == null:
+		chooser = BlockChooser.new()
+		add_child(chooser)
+		chooser.chosen.connect(func(line: String, keep_open: bool) -> void:
+			if _chosen.is_valid(): _chosen.call(line, keep_open))
+	_chosen = then
+	var story := row.duplicate()
+	story.script_field = field
+	var offers: Array = []
+	if current.is_empty() and row.def.type in ["item", "condition"]:
+		for id: String in ["survival.heal", "survival.eat", "survival.drink"]:
+			var entry := BlockCatalog.by_id(id)
+			if not entry.is_empty(): offers.append({"entry": entry, "slots": {}})
+	chooser.open(workspace, "action", StoryBlocks.contexts(story), offers, current, row.def.id if row.def.type == "event" else "")
+
+## Adds an action to one of this content's stories (an item's use, a
+## condition's each turn), before any responses or final link.
+func add_reaction(field: String) -> void:
+	if pending_rows:
+		problem.emit("Apply or discard your edited entries first.")
+		return
+	_ask_action(field, {}, func(line: String, _keep_open: bool) -> void:
+		var current := _current_row().duplicate()
+		if current.is_empty(): return
+		current.script_field = field
+		var error := workspace.transaction("Add “" + BlockCatalog.sentence(line, workspace) + "”", func() -> String: return StoryGraph.add_primary_effect(current, line))
+		if not error.is_empty(): problem.emit(error)
+		else: changed.emit(_current_row()))
+
+## Changes one action of such a story through the same chooser.
+func change_reaction(field: String, node: Dictionary) -> void:
+	var read := BlockCatalog.read_line(str(node.text))
+	if read.is_empty():
+		problem.emit("This action is kept as written. Open the story to see it among its blocks.")
+		return
+	_ask_action(field, read, func(line: String, _keep_open: bool) -> void:
+		var current := _current_row().duplicate()
+		if current.is_empty(): return
+		current.script_field = field
+		var error := workspace.transaction("Change “" + BlockCatalog.sentence(line, workspace) + "”", func() -> String: return StoryGraph.set_effect(current, node, line))
+		if not error.is_empty(): problem.emit(error)
+		else: changed.emit(_current_row()))
+
 func _add_item_steps(nodes: Array, depth: int = 0) -> void:
 	for node: Dictionary in nodes:
 		if node.kind == "effect":
 			var line := HBoxContainer.new()
 			var change := Button.new()
-			change.text = AuthoringCatalog.effect_label(str(node.text))
+			change.text = BlockCatalog.sentence(str(node.text), workspace) if not BlockCatalog.read_line(str(node.text)).is_empty() else AuthoringCatalog.effect_label(str(node.text))
 			change.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			change.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			change.clip_text = true
 			change.tooltip_text = change.text
 			change.disabled = not row.doc.writable
-			change.pressed.connect(func() -> void: reaction_requested.emit(_item_script(), node, ""))
+			change.pressed.connect(func() -> void: change_reaction("use", node))
 			line.add_child(change)
 			var remove := Button.new()
 			remove.text = "Remove"
@@ -589,20 +635,12 @@ func _add_event_flow() -> void:
 		_event_note("Zone events belong to a shared encounter pool. Arrival events are checked on entry.")
 		return
 	var requirement: String = row.doc.field_value(row.def, "requires")
-	_event_note("Only if: " + EventTriggers.describe_condition(workspace, requirement))
-	var controls := HFlowContainer.new()
-	body.add_child(controls)
-	var add := Button.new()
-	add.text = "+ Add condition"
-	add.disabled = not row.doc.writable
-	add.pressed.connect(func() -> void:
-		if not pending_rows: condition_requested.emit(row))
-	controls.add_child(add)
-	var clear := Button.new()
-	clear.text = "Remove all conditions"
-	clear.disabled = not row.doc.writable or requirement.is_empty()
-	clear.pressed.connect(func() -> void: _set_value("requires", ""))
-	controls.add_child(clear)
+	var needs: FscParser.Field = row.def.fields.get("requires")
+	body.add_child(AuthoringLayout.label("Only if", 13, true))
+	if (needs == null or needs.children.is_empty()) and (requirement.is_empty() or not Condition.compile(requirement).has("error")):
+		# The same condition builder as everywhere else: sentences in groups of all, any or none.
+		_add_condition_field("requires", requirement)
+	else: _event_note("Kept as written: " + requirement)
 	for key: String in ["repeat", "chance", "cooldown", "priority"]:
 		if row.def.fields.has(key) or key == "repeat" or show_all: _add_field(key, "text")
 	var more := Button.new()
@@ -1135,7 +1173,7 @@ func _add_stats_field(key: String, value: String) -> void:
 
 ## Fields that hold a condition: "when", "requires" and everything ending in "when".
 static func is_condition_field(type: String, key: String) -> bool:
-	return key == "when" or key.ends_with(" when") or key.ends_with(" while") or key.ends_with(" requires") or (key == "requires" and type != "event")
+	return key in ["when", "requires"] or key.ends_with(" when") or key.ends_with(" while") or key.ends_with(" requires")
 
 ## Opens the condition builder for a field; what is built is written to it.
 func _ask_condition(key: String, value: String, heading: String, may_be_empty: bool) -> void:
@@ -1164,7 +1202,7 @@ func _add_condition_field(key: String, value: String) -> void:
 	change.text = "Change…" if not value.is_empty() else "Set a condition…"
 	change.disabled = not writable
 	change.pressed.connect(func() -> void:
-		_ask_condition(key, value, AuthoringCatalog.property(row.def.type, key, "text").title, true))
+		_ask_condition(key, value, "This event can happen only if…" if row.def.type == "event" and key == "requires" else AuthoringCatalog.property(row.def.type, key, "text").title, true))
 	line.add_child(change)
 	if not value.is_empty():
 		var clear := Button.new()

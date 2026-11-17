@@ -1801,10 +1801,6 @@ func _build_visual_details() -> void:
 	visual_details.changed.connect(_on_canvas_changed)
 	visual_details.problem.connect(_show_error)
 	visual_details.story_requested.connect(_open_visual_script)
-	visual_details.condition_requested.connect(func(row: Dictionary) -> void: story_canvas._open_picker(row, {}, "event_condition"))
-	visual_details.reaction_requested.connect(func(row: Dictionary, action: Dictionary, category: String) -> void:
-		if action.is_empty(): story_canvas._open_picker(row, {}, "effect", category)
-		else: story_canvas._open_existing_effect(row, {}, action))
 
 func _build_world_tab() -> void:
 	world_canvas = WorldCanvas.new()

@@ -108,6 +108,8 @@ static func describe(value: PackWorkspace, text: String) -> String:
 static func describe_condition(value: PackWorkspace, text: String) -> String:
 	if text.is_empty():
 		return "No extra condition"
+	# One wording for conditions everywhere: the block catalog's sentences.
+	if not Condition.compile(text).has("error"): return BlockCatalog.condition_sentence(text, value)
 	var sentence := _condition_sentence(value, Condition.compile(text))
 	return text if sentence.is_empty() else sentence
 
