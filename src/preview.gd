@@ -174,12 +174,16 @@ static func _render_nodes(nodes: Array, game: Game, result: Array[Dictionary], d
 				return true
 	return false
 
+## The sample player chosen here: sex, body form, level and the values set for it.
+func preset() -> Dictionary:
+	return {"sex": ["female", "male", "herm", "neuter"][maxi(sample.selected, 0)] if sample != null else "female", "form": sample_form, "level": sample_level, "values": overrides}
+
 func refresh() -> void:
 	if output == null or workspace == null: return
 	for child: Node in output.get_children():
 		output.remove_child(child)
 		child.queue_free()
-	last_entries = render_story(workspace, row, {"sex": ["female", "male", "herm", "neuter"][sample.selected], "form": sample_form, "level": sample_level, "values": overrides}, seed_value)
+	last_entries = render_story(workspace, row, preset(), seed_value)
 	rendered.emit()
 	for entry: Dictionary in last_entries:
 		if entry.kind == "branch": continue

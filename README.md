@@ -2,7 +2,7 @@
 
 MAGE:EDITOR is an offline desktop tool for making MAGE content packs without learning the content format. You work on one pack and can load other packs to use their content. The editor writes ordinary pack files and checks them with the game engine itself.
 
-The editor is in development. Stories, conversations, events and the common content types can be built visually; many settings of the rarer types are still typed. Content the editor cannot show yet is kept exactly as it is.
+The editor is in development. Stories, conversations, events and every content type can be built visually; what is still missing is listed under "Not finished". Content the editor cannot show yet is kept exactly as it is.
 
 ## Start
 
@@ -23,13 +23,41 @@ The editor uses the engine's own reader and checker from that checkout, without 
 | Top bar | **Pack** (new, open, add another pack, import a picture), **Undo / Redo**, **Find anything** (Ctrl+K), **Create**, **Play**, the check result, and **Save**. The gear holds appearance, interface size and the technical views. |
 | Library (left) | Everything in your pack by kind, and the other loaded packs folded away. Choose an entry to open it, or drag it into a story, onto the map or onto a matching picker. Opening a pack also loads the packs in the folder beside it that belong with it (see below). **Pack → Add another pack** takes one more pack or a whole folder of packs. |
 | Home | Guided tasks, what you worked on with hints about what it still needs, and problems. |
-| Stories | The board: one card per story, with lines showing how they lead to each other. Select a card to see its blocks in the side editor. **Tidy up** arranges the cards. |
-| Map | Places and the ways between them. Drag from one place to another to connect them, with or without a door. Select a place to set its area (what is found while exploring) and its region, to add a door to a way, and to see what happens there. **Arrange as in the game** lays the places out as the game's own map does. |
+| Stories | The board. The story you opened is drawn as a flow from left to right: what starts it, its text and actions, each check with a way out for every answer, the player's responses, fights and where it ends. The stories around it are cards; click one to open it. See "The board" below. |
+| Map | The map as the game draws it: one part of the world at a time, north up, a dot for each place and a path for each way. Click a place to see what happens there. See "The map" below. |
 | Details | Everything about the selected content. Conditions read in words and open the condition builder; lists of words are chips; numbers, spans, chances, switches and choices have their own controls; settings with several parts (what an item is worn as, a body part, a creature's trophies, the warnings at each level of hunger) are sheets and rows. A hook's moment is chosen from a list, including a share of the enemy's health and a moment one of your stories raises. An event's condition is built with the condition builder, and an item's reactions are chosen in "What should happen?", as in a story. The small buttons beside the name show where the content is used, rename it everywhere, duplicate it and delete it. |
 | Side editor (right) | The selected story as blocks, with a preview underneath. |
 | Status line | What just happened, with **Undo**, and where you are. |
 
 **‹ ›** beside Home go back and forward through what you looked at (Alt+← / Alt+→). The **☰** button opens the lists of saved values and problems: choose a value to see every story that changes it and every story that reads it.
+
+## The board
+
+Opening a story (from the library, from Home, from another story's card) draws it on the board:
+
+| Node | What it shows |
+|---|---|
+| ⚡ The story's own card | What starts it: an event's trigger, condition and how often it happens; "When the player talks to Wren" for a story inside other content; the stories that lead to it; or a warning that nothing leads there yet. **Details** opens its settings. |
+| 💬 Text, ⚙ Actions | A run of text and actions in order: the first lines, and how many more there are. |
+| ◇ Check | An "Only if": one way out for each condition, and one for when none holds. |
+| ☰ The player chooses | The responses, each with its own way out. A ◈ marks a response that is only offered under a condition. |
+| ⚔ Fight | The creature, and a way out for each result that has its own part. |
+| ⏹ Ends here, ↩ Goes back | Where the story stops. From **Then go on with…** it can be sent on to another story. |
+
+Click a node to find its blocks in the side editor, where they are changed. Orange dots are ways you can lead elsewhere: drag one to another story's card (a response, the ending, a played story); right-click a line to remove the link. Blue lines follow from the blocks themselves. A very long story draws its first sixty parts and says how many blocks are further in. **Show all stories** shows every story as a card, without a flow; **Tidy up** arranges the board again.
+
+## The map
+
+The map is drawn with the game's own layout, so a place is where the player will see it: north is up, places joined by compass ways stand beside each other, ways up, down, inside and outside step off to the side. A ◆ is a fast-travel point, a small door on a path is a door, an arrow is a way that only leads one way, and a short dashed stub is a way that leaves this part of the map. Your own places are bright; places of other packs are outlined.
+
+| To | Do |
+|---|---|
+| See another part of the world | Choose it in the list beside **MAP**: the game shows one region at a time, or the places of an area that belong to no region. |
+| See what happens at a place | Click it: its events, people and items, its ways out, its area and region are listed on the right. Double-click opens its details. |
+| Connect two places | Drag from one to the other. The direction offered is the one the second place lies in; choose a door if the way goes through one. Hold Shift for a way that only leads one way. |
+| Remove a way | Right-click its path, or use the ✕ beside it in the place's list of ways out. |
+| Put a place somewhere of your own choosing | Hold Ctrl and drag it. The game then keeps it there, and the places joined to it by compass ways follow. **Let the game place it** on the right gives the position back. |
+| Move around | Drag the background, turn the mouse wheel, or use **−**, **+** and **Fit**. The arrow keys go from place to place. |
 
 ## Working beside other packs
 
@@ -57,7 +85,7 @@ Each block is a sentence. The highlighted parts are chips: choose one to change 
 | To | Do |
 |---|---|
 | Add | **+ Text**, **+ Action** or **+ More** at the place you want it. Action opens "What should happen?": search with everyday words (heal, trust, teleport), fill in the sentence, **Add** or **Add & next**. You can also type a line you know. |
-| Write | Double-click a text block. **Insert** adds a name, he or she, or a counter's number; **Vary** and **Only if…** wrap the selected words. Ctrl+Enter keeps the text, Esc cancels. |
+| Write | Double-click a text block, or choose **+ Text**: a large writing window opens. Its toolbar has undo, **B**old and *I*talic, **Insert** (a name, he or she, a counter's number, a text kept for reuse), **Body** (words about the player's body), **Vary** (several versions, and how the game goes through them), **Only if…** and **Style** (a roll, a warning). Select words first to change those words. Beside the text it shows the words as a sample player reads them, and under it what the game cannot read yet. Ctrl+Enter keeps the text, Esc leaves it. Long text fields on the Details page open the same window from **⤢ Write in a large window**. |
 | Make it conditional | **⋯ → Only if…** puts the block (or all selected blocks) inside a condition. Conditions are built from sentences in groups: all of, any of, none of. Add **Otherwise, if…** and **Otherwise** from the condition's own menu. |
 | Move | Drag the handle; hold Ctrl to copy. Or use **⋯ → Move up / Move down**, Alt+↑ / Alt+↓, or cut and paste. Shift-click and Ctrl-click select several blocks. |
 | Copy between stories | Copy and paste work as lines of the content format, also to and from a text editor. |
@@ -95,8 +123,10 @@ The game is taken from the engine checkout the editor was started with (`--engin
 
 ## Not finished
 
-- The rules for importing another game's saves are typed in the format's words in a text box. Every other field has its own control: a picker, number boxes, a switch, chips, a condition in words, rows, sheets (also one for each variant of a creature), or a text box for words the player reads.
-- The map does not set travel order, map grids or hand-set map positions; a door that leads into an area is set in the door's details.
+- Every field has its own control (a picker, number boxes, a switch, chips, a condition in words, rows, sheets, a text box for words the player reads), but a few number fields of the rules types take a calculation as a short typed formula, and the roles and change texts of saved values cannot be changed.
+- In the writing window, variations and conditional words are written as marked text, not as panels; there is no spell check.
+- The map does not set a region's travel order or map grid; a door that leads into an area is set in the door's details. Exits that stories make in play are placed by the game's layout but not drawn as paths.
+- The board draws the flow of one story at a time; a part of the flow is changed in the side editor, not on the board.
 - Playing in the game does not lead back to the block that was played, and the sample player's body form is not passed on.
 - With very many packs loaded (several thousand pieces of content), the preview under the blocks updates when you ask. A check of your own pack does not look again at the other packs' stories: a problem your change causes in another pack's story shows after **Check**.
 - A board of every story of a large game is not drawn: beyond 150 cards the board shows the first ones and says how many are left out. Choose a story to see it with its neighbours.

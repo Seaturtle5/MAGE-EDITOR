@@ -1,6 +1,8 @@
 class_name WorldCanvas
 extends VBoxContainer
-## Visualize places and add directional exits without rewriting their other fields.
+## The map as the game draws it, one part at a time, with what happens at the
+## chosen place beside it. Ways between places are made and removed here
+## without rewriting the places' other fields.
 
 signal selected(row: Dictionary)
 signal open_requested(row: Dictionary)
@@ -10,15 +12,23 @@ signal event_requested(place: Dictionary)
 signal place_requested
 
 const DIRECTIONS := ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest", "up", "down", "inside", "outside"]
+## The part of the map for places the game keeps off its map (holding rooms).
+const OFF_MAP := "off map"
 
 var workspace: PackWorkspace
-var graph: GraphEdit
+var surface: MapSurface
+var region_picker: OptionButton
+## The parts of the map, in the game's order: {key, name, places: [ids], own: int}.
+var groups: Array[Dictionary] = []
+var shown_group := ""
+## Every place on the map, with the part it is on.
 var nodes: Dictionary = {}
-var rows_by_node: Dictionary = {}
+## Where the game's layout puts each place within its part.
+var cells: Dictionary = {}
+## The ways drawn in the part that is shown: {a, b, both, door}.
+var ways: Array[Dictionary] = []
 var exits_by_place: Dictionary = {}
 var contents_by_place: Dictionary = {}
-var positions: Dictionary = {}
-var layout_target := ""
 var exit_dialog: ConfirmationDialog
 var direction: OptionButton
 var one_way: CheckButton
@@ -32,59 +42,67 @@ var places_by_id: Dictionary = {}
 var door_check: CheckButton
 var door_name: LineEdit
 var door_locked: CheckButton
+var scope_note: Label
+var _follow := false
+var _pictures: Dictionary = {}
 
 func _ready() -> void:
 	var toolbar := HBoxContainer.new()
 	var title := Label.new()
-	title.text = "PLACES & CONNECTIONS"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.text = "MAP"
 	toolbar.add_child(title)
+	region_picker = OptionButton.new()
+	region_picker.tooltip_text = "The game shows one part of the world at a time: a region, or the places of an area that belong to no region."
+	region_picker.fit_to_longest_item = false
+	region_picker.custom_minimum_size.x = 230
+	region_picker.item_selected.connect(func(index: int) -> void: show_group(str(region_picker.get_item_metadata(index))))
+	toolbar.add_child(region_picker)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toolbar.add_child(spacer)
 	var add_place := Button.new()
 	add_place.text = "+ Place"
 	add_place.tooltip_text = "Add a new place to the map."
 	add_place.pressed.connect(func() -> void: place_requested.emit())
 	toolbar.add_child(add_place)
-	var arrange := Button.new()
-	arrange.text = "Arrange as in the game"
-	arrange.tooltip_text = "Lay the places out as the game's own map does: north up, east right, from their exits."
-	arrange.pressed.connect(arrange_like_game)
-	toolbar.add_child(arrange)
-	var world := CheckButton.new()
-	world.text = "Every place"
-	world.tooltip_text = "Show the places of every loaded pack, not only yours and the ones they touch (at most %d)." % MAX_PLACES
-	world.toggled.connect(func(on: bool) -> void:
-		show_world = on
-		refresh())
-	world.hide()
-	world_switch = world
-	toolbar.add_child(world)
+	var smaller := Button.new()
+	smaller.text = "−"
+	smaller.tooltip_text = "Zoom out (the mouse wheel does the same)."
+	smaller.pressed.connect(func() -> void: surface.zoom_by(1.0 / 1.25, surface.size / 2.0))
+	toolbar.add_child(smaller)
+	var larger := Button.new()
+	larger.text = "+"
+	larger.tooltip_text = "Zoom in (the mouse wheel does the same)."
+	larger.pressed.connect(func() -> void: surface.zoom_by(1.25, surface.size / 2.0))
+	toolbar.add_child(larger)
 	var fit := Button.new()
-	fit.text = "Fit places"
+	fit.text = "Fit"
+	fit.tooltip_text = "Show every place of this part of the map."
 	fit.pressed.connect(_fit_places)
 	toolbar.add_child(fit)
 	add_child(toolbar)
 	var hint := Label.new()
-	hint.text = "Drag from the dot on a place to another place to connect them, with or without a door. Right-click a connection to remove an exit. Select a place to set its area and region."
+	hint.text = "Drawn as the game draws its map: north is up, ◆ is a fast-travel point. Click a place to see what happens there. Drag from one place to another to connect them (Shift: one way); right-click a way to remove it. Ctrl-drag a place to give it a position of its own."
 	hint.theme_type_variation = "MutedLabel"
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(hint)
 	scope_note = AuthoringLayout.label("", 12, true)
-	scope_note.hide()
 	add_child(scope_note)
-	graph = DropSurface.new()
-	graph.workspace = workspace
-	graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	graph.minimap_enabled = false
-	graph.right_disconnects = true
-	graph.connection_request.connect(_request_exit)
-	graph.disconnection_request.connect(_request_remove_exit)
-	graph.node_selected.connect(_select_node)
+	surface = MapSurface.new()
+	surface.workspace = workspace
+	surface.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	surface.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	surface.place_chosen.connect(_choose)
+	surface.place_opened.connect(func(id: String) -> void:
+		if places_by_id.has(id): open_requested.emit(places_by_id[id]))
+	surface.connect_requested.connect(_request_exit)
+	surface.way_chosen.connect(_request_remove_exit)
+	surface.place_moved.connect(_move_place)
 	var split := HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(split)
-	split.add_child(graph)
-	graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	split.add_child(surface)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size.x = 300
 	split.add_child(panel)
@@ -99,6 +117,7 @@ func _ready() -> void:
 
 func configure(value: PackWorkspace) -> void:
 	workspace = value
+	if surface != null: surface.workspace = value
 
 func _build_dialogs() -> void:
 	exit_dialog = ConfirmationDialog.new()
@@ -159,49 +178,35 @@ func _title(row: Dictionary) -> String:
 	var value := _field(row, "name")
 	return value if not value.is_empty() else str(row.def.id)
 
-func _load_layout() -> void:
-	if layout_target == workspace.target:
-		return
-	layout_target = workspace.target
-	positions.clear()
-	var config := ConfigFile.new()
-	if config.load(_layout_file()) == OK:
-		for key: String in config.get_section_keys("places"):
-			positions[key] = config.get_value("places", key)
+## A part of the map by its key, or {}.
+func group(key: String) -> Dictionary:
+	for entry: Dictionary in groups:
+		if entry.key == key: return entry
+	return {}
 
-func _layout_file() -> String:
-	return OS.get_user_data_dir().path_join("layouts").path_join("world-" + workspace.target.sha256_text() + ".cfg")
+## What a part of the map is called: its region's or area's name.
+func _group_name(content: ContentDB, key: String) -> String:
+	if key == OFF_MAP: return "Places kept off the map"
+	if key == "zone:": return "Places without a region"
+	if key.begins_with("zone:"): return "Area: " + content.typed_value("zone", key.substr(5), "name", key.substr(5).capitalize())
+	return content.typed_value("region", key, "name", key.capitalize())
 
-func _moved(_from: Vector2, to: Vector2, id: String) -> void:
-	positions[id] = to
-	var config := ConfigFile.new()
-	for key: String in positions:
-		config.set_value("places", key, positions[key])
-	DirAccess.make_dir_recursive_absolute(_layout_file().get_base_dir())
-	config.save(_layout_file())
-
-## At most this many places are drawn.
-const MAX_PLACES := 200
-## More places than this, with other packs loaded, and the map shows only yours and their neighbours.
-const CROWDED := 60
-var show_world := false
-var scope_note: Label
-var world_switch: CheckButton
+## The game's order for the parts: regions by travel order, then areas, then the rest.
+func _group_order(content: ContentDB, key: String) -> int:
+	if key == OFF_MAP: return 1 << 23
+	if content.has(key, "region"):
+		var order := content.typed_value("region", key, "travel order")
+		return int(order) if order.is_valid_int() else 1 << 20
+	return (1 << 21) if key != "zone:" else (1 << 22)
 
 func refresh() -> void:
-	if workspace == null or graph == null:
+	if workspace == null or surface == null:
 		return
-	_load_layout()
-	graph.clear_connections()
-	for child: Node in graph.get_children():
-		if child is GraphNode:
-			graph.remove_child(child)
-			child.queue_free()
-	nodes.clear()
-	rows_by_node.clear()
 	exits_by_place.clear()
 	contents_by_place.clear()
 	places_by_id.clear()
+	nodes.clear()
+	cells.clear()
 	var content := workspace.preview_content()
 	var event_rows: Dictionary = {}
 	var places: Array[Dictionary] = []
@@ -265,62 +270,6 @@ func refresh() -> void:
 		var display: Dictionary = places[index].duplicate()
 		display.effective = content.get_def("location", display.def.id)
 		places[index] = display
-	# With a whole game loaded the map shows your own places and what touches
-	# them, not every place there is.
-	var every := places.size()
-	var crowded: bool = workspace.pack_paths.size() > 1 and every > CROWDED
-	if crowded and not show_world:
-		var mine: Dictionary = {}
-		for path: String in workspace._own_rows:
-			for own: Dictionary in workspace._own_rows[path].rows:
-				if own.def.type == "location": mine[own.def.id] = true
-		var near: Dictionary = {}
-		for id: String in exits_by_place:
-			for entry: Dictionary in exits_by_place[id]:
-				if mine.has(id): near[entry.target] = true
-				if mine.has(entry.target): near[id] = true
-		for home: String in people:
-			if people[home].any(func(person: Dictionary) -> bool: return person.doc.writable): near[home] = true
-		for place: String in events_at:
-			if events_at[place].any(func(event: Dictionary) -> bool: return event.doc.writable): near[place] = true
-		var chosen: Array[Dictionary] = places.filter(func(place: Dictionary) -> bool: return mine.has(place.def.id) or near.has(place.def.id))
-		if not chosen.is_empty(): places = chosen
-	if places.size() > MAX_PLACES: places = places.slice(0, MAX_PLACES)
-	if world_switch != null: world_switch.visible = crowded
-	if scope_note != null:
-		scope_note.visible = crowded
-		scope_note.text = ("Every place of the loaded packs" if show_world else "Your places and the places they touch") + ": %d of %d." % [places.size(), every]
-	var place_names: Dictionary = {}
-	var region_bounds: Dictionary = {}
-	for place: Dictionary in places:
-		place_names[place.def.id] = _title(place)
-		var region := _field(place, "region")
-		if not region_bounds.has(region):
-			region_bounds[region] = {"min_x": 2147483647, "max_x": -2147483647, "min_y": 2147483647, "max_y": -2147483647, "unplaced": 0}
-		var bounds: Dictionary = region_bounds[region]
-		var point := _field(place, "map").split(",")
-		if point.size() == 2 and point[0].strip_edges().is_valid_int() and point[1].strip_edges().is_valid_int():
-			bounds.min_x = mini(bounds.min_x, int(point[0]))
-			bounds.max_x = maxi(bounds.max_x, int(point[0]))
-			bounds.min_y = mini(bounds.min_y, int(point[1]))
-			bounds.max_y = maxi(bounds.max_y, int(point[1]))
-		else:
-			bounds.unplaced += 1
-	var regions: Array = region_bounds.keys()
-	regions.sort()
-	var region_offset := 0
-	for region: String in regions:
-		var bounds: Dictionary = region_bounds[region]
-		if bounds.min_x == 2147483647:
-			bounds.min_x = 0
-			bounds.max_x = -1
-			bounds.min_y = 0
-			bounds.max_y = -1
-		bounds.offset = region_offset
-		bounds.unplaced_index = 0
-		var columns: int = maxi(bounds.max_x - bounds.min_x + 1, mini(bounds.unplaced, 4))
-		region_offset += (columns + 1) * 330
-	var index := 0
 	for row: Dictionary in places:
 		var id: String = row.def.id
 		places_by_id[id] = row
@@ -337,82 +286,132 @@ func refresh() -> void:
 				entries.append({"kind": "Zone-wide", "row": event})
 				seen_events[event.def.id] = true
 		contents_by_place[id] = entries
-		var card := GraphNode.new()
-		card.name = "place_" + str(index)
-		card.title = _title(row)
-		card.custom_minimum_size.x = 250
-		var bounds: Dictionary = region_bounds[_field(row, "region")]
-		var unplaced: int = bounds.unplaced_index
-		var pos := Vector2(60 + int(bounds.offset) + (unplaced % 4) * 330, 60 + (int(bounds.max_y) - int(bounds.min_y) + 2 + unplaced / 4) * 240)
-		var coord := _field(row, "map").split(",")
-		if coord.size() == 2 and coord[0].strip_edges().is_valid_int() and coord[1].strip_edges().is_valid_int():
-			pos = Vector2(60 + int(bounds.offset) + (int(coord[0]) - int(bounds.min_x)) * 330, 60 + (int(coord[1]) - int(bounds.min_y)) * 240)
-		else:
-			bounds.unplaced_index += 1
-		card.position_offset = positions.get(id.sha256_text(), pos)
-		card.dragged.connect(_moved.bind(id.sha256_text()))
-		graph.add_child(card)
-		nodes[id] = card.name
-		rows_by_node[card.name] = row
-		var info := Label.new()
-		info.text = "Your pack" if row.doc.writable else "Reference · " + str(row.pack)
-		if not _field(row, "region").is_empty():
-			info.text += "  ·  " + _field(row, "region").capitalize()
-		if _field(row, "zone") not in ["", "none"]:
-			info.text += "  ·  " + _field(row, "zone").capitalize()
-		card.add_child(info)
-		card.set_slot(0, true, 0, Color("b87d38"), true, 0, Color("b87d38"))
-		for exit: Dictionary in exits_by_place.get(id, []):
-			var exit_label := Label.new()
-			# A place that is not drawn (another pack's, out of view) is still named.
-			var destination: String = place_names.get(exit.target, workspace.title_of("location", str(exit.target)) if not workspace.title_of("location", str(exit.target)).is_empty() else exit.text)
-			if "door " in str(exit.text) and not str(exit.target).is_empty():
-				destination += " · " + str(exit.text).get_slice("door ", 1).get_slice(",", 0).capitalize()
-			if "one way" in str(exit.text):
-				destination += " · one way"
-			exit_label.text = str(exit.direction).capitalize() + " → " + destination
-			card.add_child(exit_label)
-		var details := Button.new()
-		details.text = _contents_summary(entries)
-		details.pressed.connect(_show_contents.bind(row))
-		card.add_child(details)
-		var add_event := Button.new()
-		add_event.text = "+ Add event here"
-		add_event.pressed.connect(func() -> void: event_requested.emit(row))
-		card.add_child(add_event)
-		index += 1
-	for place: String in exits_by_place:
-		if not nodes.has(place): continue
-		for exit: Dictionary in exits_by_place[place]:
-			if nodes.has(exit.target) and not graph.is_node_connected(nodes[place], 0, nodes[exit.target], 0) and not graph.is_node_connected(nodes[exit.target], 0, nodes[place], 0):
-				graph.connect_node(nodes[place], 0, nodes[exit.target], 0)
+	# Where the game's own layout puts every place, and on which part of its map.
+	var layout := content.map_layout()
+	groups.clear()
+	for key: String in layout.members:
+		var members: Array = []
+		var own := 0
+		for id: String in layout.members[key]:
+			if not places_by_id.has(id): continue
+			members.append(id)
+			nodes[id] = key
+			cells[id] = layout.position.get(id, Vector2i.ZERO)
+			if places_by_id[id].doc.writable: own += 1
+		if not members.is_empty(): groups.append({"key": key, "name": _group_name(content, key), "places": members, "own": own, "order": _group_order(content, key)})
+	var off: Array = places_by_id.keys().filter(func(id: String) -> bool: return not nodes.has(id))
+	off.sort()
+	if not off.is_empty():
+		var own := 0
+		for index in off.size():
+			nodes[off[index]] = OFF_MAP
+			cells[off[index]] = Vector2i(index % 8, index / 8)
+			if places_by_id[off[index]].doc.writable: own += 1
+		groups.append({"key": OFF_MAP, "name": _group_name(content, OFF_MAP), "places": off, "own": own, "order": _group_order(content, OFF_MAP)})
+	groups.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.order < b.order if a.order != b.order else str(a.name) + str(a.key) < str(b.name) + str(b.key))
+	var before := shown_group
+	if _follow and nodes.has(inspected_id): shown_group = nodes[inspected_id]
+	_follow = false
+	if group(shown_group).is_empty():
+		# The part with most of your own places, else the first.
+		shown_group = str(groups[0].key) if not groups.is_empty() else ""
+		var most := 0
+		for entry: Dictionary in groups:
+			if int(entry.own) > most:
+				most = entry.own
+				shown_group = entry.key
+	region_picker.clear()
+	var several: bool = workspace.pack_paths.size() > 1
+	for entry: Dictionary in groups:
+		var count: int = entry.places.size()
+		region_picker.add_item("%s · %d place%s%s" % [entry.name, count, "" if count == 1 else "s", ", %d yours" % int(entry.own) if several and int(entry.own) > 0 else ""])
+		region_picker.set_item_metadata(region_picker.item_count - 1, entry.key)
+		if entry.key == shown_group: region_picker.select(region_picker.item_count - 1)
+	region_picker.visible = groups.size() > 1
+	_draw_group(before == shown_group and not surface.places.is_empty())
 	_render_inspector()
 
+## Shows another part of the map.
+func show_group(key: String) -> void:
+	if group(key).is_empty() or key == shown_group: return
+	shown_group = key
+	for index in region_picker.item_count:
+		if region_picker.get_item_metadata(index) == key: region_picker.select(index)
+	_draw_group(false)
+
+## Hands the shown part's places and ways to the drawing.
+func _draw_group(keep_view: bool) -> void:
+	var content := workspace.preview_content()
+	var entry := group(shown_group)
+	var list: Array[Dictionary] = []
+	var stubs: Array[Dictionary] = []
+	ways.clear()
+	var inside: Dictionary = {}
+	for id: String in entry.get("places", []): inside[id] = true
+	var seen: Dictionary = {}
+	for id: String in entry.get("places", []):
+		var row: Dictionary = places_by_id[id]
+		var zone := _field(row, "zone")
+		var note := _contents_summary(contents_by_place.get(id, []))
+		if zone not in ["", "none"]: note = "Area: " + workspace.title_of("zone", zone) + "\n" + note
+		if not row.doc.writable: note += "\nFrom " + str(row.pack)
+		list.append({"id": id, "name": _title(row), "cell": cells[id], "own": row.doc.writable, "fast": "fast travel" in content.list_field(id, "flags"), "note": note})
+		for exit: Dictionary in exits_by_place.get(id, []):
+			var to: String = exit.target
+			if to.is_empty() or to == id or not places_by_id.has(to): continue
+			if not inside.has(to):
+				stubs.append({"from": id, "step": Vector2(MapLayout.step_of(str(exit.direction))[0]), "name": _title(places_by_id[to])})
+				continue
+			var door: bool = "door " in str(exit.text)
+			if seen.has(to + ">" + id):
+				var back: Dictionary = seen[to + ">" + id]
+				back.both = true
+				if door: back.door = true
+			elif not seen.has(id + ">" + to):
+				var way := {"a": id, "b": to, "both": false, "door": door}
+				seen[id + ">" + to] = way
+				ways.append(way)
+	var picture: Texture2D = null
+	if content.has(shown_group, "region"):
+		var file := content.image_file(content.image_of("region", shown_group))
+		if not file.is_empty():
+			if not _pictures.has(file):
+				var loaded := Image.load_from_file(file)
+				_pictures[file] = ImageTexture.create_from_image(loaded) if loaded != null else null
+			picture = _pictures[file]
+	surface.selected = inspected_id if inside.has(inspected_id) else ""
+	surface.show_map(list, ways, stubs, picture, keep_view)
+	var total: int = places_by_id.size()
+	scope_note.visible = groups.size() > 1
+	scope_note.text = "%s: %d of the %d places. The other parts of the world are in the list above." % [entry.get("name", ""), list.size(), total]
+
+## Whether a way between two places is drawn, either way round.
+func connected(a: String, b: String) -> bool:
+	return ways.any(func(way: Dictionary) -> bool: return (way.a == a and way.b == b) or (way.a == b and way.b == a))
+
 func _fit_places() -> void:
-	var bounds := Rect2()
-	var first := true
-	for child: Node in graph.get_children():
-		if child is GraphNode:
-			var rect := Rect2(child.position_offset, child.size)
-			bounds = rect if first else bounds.merge(rect)
-			first = false
-	if first:
-		return
-	var area := graph.size - Vector2(80, 80)
-	var scale := minf(area.x / maxf(bounds.size.x, 1), area.y / maxf(bounds.size.y, 1))
-	graph.zoom = clampf(scale, graph.zoom_min, 1.0)
-	graph.scroll_offset = bounds.position * graph.zoom - Vector2(40, 40)
+	surface.fit()
 
-func _select_node(node: Node) -> void:
-	if rows_by_node.has(node.name):
-		_show_contents(rows_by_node[node.name])
-		selected.emit(rows_by_node[node.name])
+func _choose(id: String) -> void:
+	if not places_by_id.has(id): return
+	_show_contents(places_by_id[id])
+	selected.emit(places_by_id[id])
 
-func _request_exit(from: StringName, _from_port: int, to: StringName, _to_port: int) -> void:
-	if not rows_by_node.has(from) or not rows_by_node.has(to) or from == to:
+## Offers to connect two places; the direction is the one the second lies in on the map.
+func _request_exit(from: String, to: String, single: bool = false) -> void:
+	if not places_by_id.has(from) or not places_by_id.has(to) or from == to:
 		return
-	exit_source = rows_by_node[from]
-	exit_target = rows_by_node[to]
+	exit_source = places_by_id[from]
+	exit_target = places_by_id[to]
+	var wanted := ""
+	var delta := Vector2(cells.get(to, Vector2i.ZERO) - cells.get(from, Vector2i.ZERO))
+	if nodes.get(from, "") == nodes.get(to, "") and delta != Vector2.ZERO:
+		var nearest := -2.0
+		for name: String in MapLayout.STEPS:
+			var along := Vector2(MapLayout.STEPS[name]).normalized().dot(delta.normalized())
+			if along > nearest:
+				nearest = along
+				wanted = name
 	var first_available := -1
 	for index in DIRECTIONS.size():
 		var taken := false
@@ -420,13 +419,13 @@ func _request_exit(from: StringName, _from_port: int, to: StringName, _to_port: 
 			if existing.direction == DIRECTIONS[index]:
 				taken = true
 		direction.set_item_disabled(index, taken)
-		if not taken and first_available < 0:
+		if not taken and (first_available < 0 or DIRECTIONS[index] == wanted):
 			first_available = index
 	if first_available < 0:
 		problem.emit("This place already has an exit in every available direction.")
 		return
 	direction.select(first_available)
-	one_way.button_pressed = Input.is_key_pressed(KEY_SHIFT)
+	one_way.button_pressed = single
 	door_check.button_pressed = false
 	door_name.text = ""
 	door_name.hide()
@@ -435,11 +434,12 @@ func _request_exit(from: StringName, _from_port: int, to: StringName, _to_port: 
 	exit_dialog.title = "Connect %s → %s" % [_title(exit_source), _title(exit_target)]
 	exit_dialog.popup_centered()
 
-func _request_remove_exit(from: StringName, _from_port: int, to: StringName, _to_port: int) -> void:
-	if not rows_by_node.has(from) or not rows_by_node.has(to):
+## Asks which of the ways between two places to remove.
+func _request_remove_exit(from: String, to: String) -> void:
+	if not places_by_id.has(from) or not places_by_id.has(to):
 		return
-	var first: Dictionary = rows_by_node[from]
-	var second: Dictionary = rows_by_node[to]
+	var first: Dictionary = places_by_id[from]
+	var second: Dictionary = places_by_id[to]
 	remove_exit_options.clear()
 	for pair: Array in [[first, second], [second, first]]:
 		for exit: Dictionary in exits_by_place.get(pair[0].def.id, []):
@@ -455,7 +455,10 @@ func _request_remove_exit(from: StringName, _from_port: int, to: StringName, _to
 func _remove_exit() -> void:
 	if remove_exit_options.selected < 0:
 		return
-	var entry: Dictionary = remove_exit_options.get_item_metadata(remove_exit_options.selected)
+	_remove_exit_entry(remove_exit_options.get_item_metadata(remove_exit_options.selected))
+
+## Takes one way out of its place's exits; the way back stays.
+func _remove_exit_entry(entry: Dictionary) -> void:
 	var old: Dictionary = entry.row
 	var current := workspace.find_row(old.doc.path, "location", old.def.id, old.def.mode, old.get("ordinal", 0))
 	if current.is_empty() or not current.doc.writable:
@@ -489,31 +492,27 @@ func _add_exit() -> void:
 	var updated := workspace.find_row(exit_source.doc.path, "location", exit_source.def.id, exit_source.def.mode, exit_source.get("ordinal", 0))
 	changed.emit(updated)
 
-## Places the cards as the game's own map lays the places out, one group
-## of places beside the next.
-func arrange_like_game() -> void:
-	var layout := MapLayout.build(workspace.preview_content())
-	var offset := 0.0
-	var groups: Array = layout.members.keys()
-	groups.sort()
-	for key: String in groups:
-		var low := Vector2i(1000000, 1000000)
-		var high := Vector2i(-1000000, -1000000)
-		for id: String in layout.members[key]:
-			var cell: Vector2i = layout.position.get(id, Vector2i.ZERO)
-			low = Vector2i(mini(low.x, cell.x), mini(low.y, cell.y))
-			high = Vector2i(maxi(high.x, cell.x), maxi(high.y, cell.y))
-		for id: String in layout.members[key]:
-			var cell: Vector2i = layout.position.get(id, Vector2i.ZERO)
-			positions[id] = Vector2(40 + offset + (cell.x - low.x) * 330.0, 60 + (cell.y - low.y) * 250.0)
-		offset += (high.x - low.x + 1) * 330.0 + 120.0
-	var folder := _layout_file().get_base_dir()
-	DirAccess.make_dir_recursive_absolute(folder)
-	var config := ConfigFile.new()
-	for id: String in positions: config.set_value("nodes", id, positions[id])
-	config.save(_layout_file())
-	refresh()
-	_fit_places.call_deferred()
+## Gives a place a position of its own on the game's map (Ctrl-drag), or with
+## `clear` hands it back to the game's layout.
+func _move_place(id: String, cell: Vector2i, clear: bool = false) -> void:
+	var shown: Dictionary = places_by_id.get(id, {})
+	if shown.is_empty() or nodes.get(id, "") == OFF_MAP: return
+	var row := workspace.find_row(shown.doc.path, "location", shown.def.id, shown.def.mode, shown.get("ordinal", 0))
+	if row.is_empty() or not row.doc.writable:
+		problem.emit("%s belongs to another pack: its position on the map cannot be changed here." % _title(shown))
+		return
+	if not clear:
+		if cells.get(id, Vector2i.ZERO) == cell: return
+		for other: String in cells:
+			if other != id and nodes[other] == nodes[id] and cells[other] == cell:
+				problem.emit("%s is already there." % _title(places_by_id[other]))
+				return
+	var error := workspace.transaction(("Let the game place %s" if clear else "Move %s on the map") % _title(shown), func() -> String:
+		return row.doc.remove_simple_field(row.def, "map") if clear else row.doc.set_field(row.def, "map", "%d, %d" % [cell.x, cell.y]))
+	if not error.is_empty():
+		problem.emit(error)
+		return
+	changed.emit(workspace.find_row(row.doc.path, "location", row.def.id, row.def.mode, row.get("ordinal", 0)))
 
 ## Asks for a door's name and lock, then puts the door on a way that exists.
 func _ask_door(place: Dictionary, exit: Dictionary) -> void:
@@ -589,8 +588,17 @@ func _place_setting(place: Dictionary, key: String, type: String, caption: Strin
 		changed.emit(workspace.find_row(row.doc.path, "location", row.def.id, row.def.mode, row.get("ordinal", 0))))
 	inspector.add_child(picker)
 
+## Chooses a place: its part of the map is shown and what happens there is listed.
 func _show_contents(row: Dictionary) -> void:
 	inspected_id = row.def.id
+	if nodes.has(inspected_id):
+		if nodes[inspected_id] != shown_group: show_group(nodes[inspected_id])
+		surface.selected = inspected_id
+		surface.reveal(inspected_id)
+		surface.queue_redraw()
+	else:
+		# The map has not been drawn yet: it opens on this place's part.
+		_follow = true
 	_render_inspector()
 
 func _inspector_label(text: String, parent: Node, size: int = 14) -> void:
@@ -611,7 +619,7 @@ func _render_inspector() -> void:
 		child.queue_free()
 	if not places_by_id.has(inspected_id):
 		_inspector_label("What happens here?", inspector, 20)
-		_inspector_label("Select a place to see its events, people and items.\n\nAdd an event from any place card to choose when it starts.", inspector)
+		_inspector_label("Click a place on the map to see its events, people, items and ways out.", inspector)
 		return
 	var place: Dictionary = places_by_id[inspected_id]
 	_inspector_label(_title(place), inspector, 21)
@@ -626,6 +634,44 @@ func _render_inspector() -> void:
 	edit.text = "Place details"
 	edit.pressed.connect(func() -> void: open_requested.emit(place))
 	inspector.add_child(edit)
+	# The ways out, in words: each leads to its place, also on another part of the map.
+	_inspector_label("WAYS OUT", inspector, 13)
+	var out: Array = exits_by_place.get(inspected_id, [])
+	if out.is_empty(): _inspector_label("None yet. Drag from this place to another on the map.", inspector, 13)
+	for exit: Dictionary in out:
+		var line := HBoxContainer.new()
+		inspector.add_child(line)
+		var target: String = exit.target
+		var go := Button.new()
+		go.theme_type_variation = "Ghost"
+		go.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		go.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		go.clip_text = true
+		var named: String = _title(places_by_id[target]) if places_by_id.has(target) else str(exit.text)
+		go.text = "%s → %s%s%s" % [str(exit.direction).capitalize(), named, " · 🚪" if "door " in str(exit.text) else "", " · one way" if "one way" in str(exit.text) else ""]
+		go.tooltip_text = "Go to %s on the map." % named if places_by_id.has(target) else "This way leads into an area, not to one place."
+		go.disabled = not places_by_id.has(target)
+		go.pressed.connect(func() -> void: _choose(target))
+		line.add_child(go)
+		if exit.row.doc.writable:
+			var drop := Button.new()
+			drop.text = "✕"
+			drop.theme_type_variation = "Ghost"
+			drop.tooltip_text = "Remove this way. The way back, if there is one, stays."
+			drop.pressed.connect(func() -> void: _remove_exit_entry(exit))
+			line.add_child(drop)
+	if nodes.get(inspected_id, "") != OFF_MAP:
+		var by_hand := not _field(place, "map").is_empty()
+		_inspector_label("ON THE MAP", inspector, 13)
+		_inspector_label("Placed by hand at %s. The places joined to it by north, south, east or west follow it." % _field(place, "map") if by_hand else "Placed by the game from its ways. Ctrl-drag it on the map to give it a position of its own.", inspector, 13)
+		if by_hand and place.doc.writable:
+			var release := Button.new()
+			release.theme_type_variation = "AddRow"
+			release.text = "Let the game place it"
+			release.pressed.connect(func() -> void: _move_place(inspected_id, Vector2i.ZERO, true))
+			inspector.add_child(release)
+	else:
+		_inspector_label("This place is kept off the game's map.", inspector, 13)
 	_place_setting(place, "zone", "zone", "AREA: WHAT IS FOUND AND MET WHILE EXPLORING HERE", "No area: nothing to explore")
 	_place_setting(place, "region", "region", "REGION: ITS PART OF THE MAP AND TRAVEL LIST", "The region of the nearest place that has one")
 	var doors: Dictionary = {}

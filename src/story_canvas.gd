@@ -7,6 +7,8 @@ signal problem(message: String)
 signal details_requested(row: Dictionary)
 signal new_story_requested
 signal next_story_requested(row: Dictionary, option: Dictionary)
+## A part of the flow was chosen: the side editor shows the block on that line.
+signal block_requested(line: int)
 
 var workspace: PackWorkspace
 var graph: GraphEdit
@@ -53,7 +55,7 @@ var remove_action: Dictionary = {}
 var remove_dialog: ConfirmationDialog
 var remove_row: Dictionary = {}
 var remove_option: Dictionary = {}
-var writing_window: Window
+var writing_window: WritingWindow
 var writing_text: TextEdit
 var writing_count: Label
 var writing_error: Label
@@ -62,6 +64,15 @@ var writing_passage: Dictionary = {}
 var writing_original := ""
 var writing_new_field := ""
 var writing_discard: ConfirmationDialog
+## The story in focus, drawn as a flow beside its own card (see StoryFlow).
+var flow: StoryFlow
+## The flow's nodes on the board, by name.
+var flow_names: Dictionary = {}
+## The card of the story in focus: what starts it, and where its flow begins.
+var focus_card := StringName()
+var _flow_drawn := false
+const FLOW_ORIGIN := Vector2(40, 50)
+const FLOW_TINTS := {"start": "event", "run": "scene", "if": "values", "choices": "item", "fight": "creature", "end": "quest", "stop": "quest", "more": "pack"}
 
 func _ready() -> void:
 	var toolbar := HFlowContainer.new()
@@ -98,7 +109,9 @@ func _ready() -> void:
 	context_label = AuthoringLayout.label("Choose a story to start writing.", 14, true)
 	add_child(context_label)
 	var help := Label.new()
-	help.text = "Select a card to see and change its blocks on the right. Drag a response's dot to another story to connect them; right-click a connection to remove it."
+	help.text = "Left to right: what starts the story, its text and actions, each check, the player's responses. Click a part to find its blocks on the right; click another story's card to open it."
+	help.tooltip_text = "Orange dots are ways you can lead elsewhere: drag one to another story's card. Right-click a line to remove its link. Blue lines follow from the blocks themselves."
+	help.mouse_filter = Control.MOUSE_FILTER_PASS
 	help.theme_type_variation = "MutedLabel"
 	help.add_theme_font_size_override("font_size", 12)
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -108,9 +121,11 @@ func _ready() -> void:
 	graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	graph.get_menu_hbox().hide()
 	graph.minimap_enabled = false
+	graph.minimap_size = Vector2(170, 110)
 	graph.right_disconnects = true
 	graph.connection_request.connect(_connect_response)
 	graph.disconnection_request.connect(_disconnect_response)
+	graph.node_selected.connect(_node_selected)
 	add_child(graph)
 	_build_picker()
 	_build_long_writer()
@@ -126,6 +141,9 @@ func configure(value: PackWorkspace) -> void:
 
 ## Arranges the cards left to right, following how stories lead to each other.
 func tidy() -> void:
+	if _flow_drawn:
+		_place_focus()
+		return
 	var incoming: Dictionary = {}
 	var outgoing: Dictionary = {}
 	for name: StringName in graph_rows:
@@ -176,6 +194,7 @@ func _card_mark(row: Dictionary) -> String:
 func refresh() -> void:
 	if workspace == null or graph == null:
 		return
+	var timing := Perf.start()
 	context_row = _fresh_row(focused_script) if not focused_script.is_empty() else (_fresh_row(focused_definition) if not focused_definition.is_empty() else {})
 	context_label.text = "All loaded stories" if show_everything and not focus_only else ("Choose a story to start writing." if context_row.is_empty() else "%s › %s › %s" % [context_row.pack, EventTriggers.title_for(workspace, context_row.def.type, context_row.def.id), str(context_row.get("script_field", "Story")).capitalize()])
 	var visible_rows: Array = []
@@ -207,21 +226,48 @@ func refresh() -> void:
 		if not focused_script.is_empty():
 			var focused := _fresh_row(focused_script)
 			if not focused.is_empty(): visible_rows.push_front(focused)
-	else:
+	elif show_everything:
 		visible_rows = workspace.rows.duplicate()
 		if not focused_script.is_empty():
 			var focused := _fresh_row(focused_script)
 			if not focused.is_empty(): visible_rows.push_front(focused)
-	context_label.text += " · " + ("This interaction only" if focus_only else ("All packs" if show_everything else "Related stories · links up to two steps away"))
+	else:
+		# Nothing is in focus: the stories of the working pack, not those of every pack loaded beside it.
+		for path: String in workspace._own_rows: visible_rows.append_array(workspace._own_rows[path].rows)
+		visible_rows.sort_custom(PackWorkspace._row_order)
+	context_label.text += " · " + ("This interaction only" if focus_only else ("All packs" if show_everything else ("The stories of your pack" if context_row.is_empty() else "Related stories · links up to two steps away")))
 	var shown: Array = []
 	for row: Dictionary in visible_rows:
 		if row.def.type in ["scene", "menu", "event", "character"] or row.has("script_field"): shown.append(row)
+	Perf.stop("board: which stories", timing)
+	timing = Perf.start()
+	# The story in focus comes first, as a flow; the stories it leads to follow it.
+	var with_flow: bool = not show_everything and not context_row.is_empty()
+	if with_flow:
+		var focus_key := _row_key(context_row)
+		var leads_to: Dictionary = {}
+		for link: Dictionary in workspace.links_touching(str(context_row.def.id)):
+			if link.from.def.id == context_row.def.id: leads_to[str(link.target)] = true
+		var first: Array = []
+		var next: Array = []
+		var rest: Array = []
+		var focus_story := _story_key(context_row)
+		for row: Dictionary in shown:
+			if _row_key(row) == focus_key:
+				if first.is_empty(): first.append(row)
+			# The same story under its content's own name (an event and its "play") is not drawn twice.
+			elif _story_key(row) == focus_story: continue
+			elif leads_to.has(str(row.def.id)) and not row.has("script_field"): next.append(row)
+			else: rest.append(row)
+		if first.is_empty(): first.append(context_row)
+		shown = first + next + rest
 	var more := maxi(0, shown.size() - MAX_CARDS)
 	if more > 0: shown = shown.slice(0, MAX_CARDS)
 	var keys: Array[String] = []
 	for row: Dictionary in shown: keys.append(_row_key(row))
-	if keys == card_keys and graph_rows.size() == shown.size():
+	if keys == card_keys and graph_rows.size() == shown.size() and with_flow == _flow_drawn:
 		# The same cards as before: only those whose content changed are drawn again.
+		var redraw_flow := false
 		for index in shown.size():
 			var name := StringName("story_" + str(index))
 			var row: Dictionary = shown[index]
@@ -236,6 +282,10 @@ func refresh() -> void:
 			_fill_card(card, row, index)
 			card_marks[name] = mark
 			card.reset_size.call_deferred()
+			if name == focus_card: redraw_flow = true
+		if redraw_flow:
+			_build_flow()
+			_place_focus()
 	else:
 		graph.clear_connections()
 		for child: Node in graph.get_children():
@@ -248,6 +298,10 @@ func refresh() -> void:
 		graph_continuations.clear()
 		card_marks.clear()
 		destinations.clear()
+		flow_names.clear()
+		flow = null
+		focus_card = StringName()
+		_flow_drawn = with_flow
 		card_keys = keys
 		var y_offsets := [60.0, 60.0, 60.0]
 		for index in shown.size():
@@ -263,28 +317,182 @@ func refresh() -> void:
 			_fill_card(card, row, index)
 			card_marks[card.name] = _card_mark(row)
 			y_offsets[column] += maxf(250.0, card.get_combined_minimum_size().y + 100.0)
-		graph.minimap_enabled = graph_rows.size() > 6
+		if with_flow:
+			_build_flow()
+			_place_focus()
 		_settle_cards.call_deferred()
 	context_label.text += " · %d cards" % graph_rows.size() + (" (%d more not drawn: choose a story to see its neighbours)" % more if more > 0 else "")
+	if with_flow and flow != null and flow.folded > 0: context_label.text += " · a long story: %d blocks further in are only in the side editor" % flow.folded
+	Perf.stop("board: cards and flow", timing)
+	timing = Perf.start()
 	var context_key := _row_key(context_row) if not context_row.is_empty() else ""
 	if context_key != shown_context:
 		shown_context = context_key
 		if not context_row.is_empty(): context_changed.emit(context_row)
 		_show_context.call_deferred()
+	Perf.stop("board: the story's blocks", timing)
+	timing = Perf.start()
 	_connect_cards()
+	Perf.stop("board: lines", timing)
 
 ## Puts a card's content in: its title, summary and the dots its links start from.
-func _fill_card(card: GraphNode, row: Dictionary, _index: int) -> void:
+func _fill_card(card: GraphNode, row: Dictionary, index: int) -> void:
 	var d: FscParser.Definition = row.def
 	card.title = d.id + (" · " + str(row.script_field).capitalize() if row.has("script_field") else "") + (" · " + d.mode if d.mode != "define" else "")
 	if d.type in ["scene", "menu"] and not row.has("script_field") and (not destinations.has(d.id) or d.mode == "define"):
 		destinations[d.id] = card.name
+	if _flow_drawn and index == 0 and not detailed_cards:
+		# The story in focus: its card says what starts it, and its flow follows.
+		focus_card = card.name
+		_build_start(card, row)
+		graph_options[card.name] = []
+		graph_continuations[card.name] = false
+		graph_play_links[card.name] = []
+		return
 	_build_card(card, row)
 	graph_options[card.name] = StoryGraph.choices(row)
+
+## The colour of a kind of node, on its title bar.
+func _tint(card: GraphNode, kind: String) -> void:
+	var colour := EditorTheme.category_color(FLOW_TINTS.get(kind, "pack"))
+	for state: String in ["titlebar", "titlebar_selected"]:
+		var bar := EditorTheme.box("raised", "accent" if state == "titlebar_selected" else "", 10)
+		bar.bg_color = EditorTheme.color("raised").lerp(colour, 0.3 if not EditorTheme.light else 0.22)
+		card.add_theme_stylebox_override(state, bar)
+
+## One line of a flow node: a single row of words, cut where the node ends.
+func _flow_line(text: String, tip: String, muted: bool = false, prose: bool = false) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.custom_minimum_size = Vector2(StoryFlow.WIDTH - 34.0, 23.0)
+	label.add_theme_font_size_override("font_size", 13)
+	if prose:
+		# What the player reads gets two lines; a width first, or it is laid out a letter per line.
+		label.size.x = StoryFlow.WIDTH - 34.0
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.max_lines_visible = 2
+	else: label.clip_text = true
+	label.tooltip_text = tip
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	if muted: label.theme_type_variation = "MutedLabel"
+	elif prose: label.theme_type_variation = "StoryLabel"
+	return label
+
+## The card of the story in focus: what it is, what starts it, and the dot its flow leaves from.
+func _build_start(card: GraphNode, row: Dictionary) -> void:
+	var d: FscParser.Definition = row.def
+	card.title = "⚡ " + Wording.title(row) + (" · " + StoryEditor.story_name(row) if row.has("script_field") else "")
+	card.tooltip_text = "What starts this story. Its text, checks and responses follow to the right."
+	card.custom_minimum_size.x = StoryFlow.WIDTH
+	_tint(card, "start")
+	var top := HBoxContainer.new()
+	card.add_child(top)
+	var info := Label.new()
+	info.text = Wording.icon(d.type) + " " + Wording.name(d.type).capitalize() + ("" if row.doc.writable else " · read-only")
+	info.add_theme_font_size_override("font_size", 12)
+	info.add_theme_color_override("font_color", EditorTheme.category_color(d.type))
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.clip_text = true
+	top.add_child(info)
+	var open_details := Button.new()
+	open_details.text = "Details"
+	open_details.theme_type_variation = "Ghost"
+	open_details.tooltip_text = "Open everything about this content, also when and where it starts."
+	open_details.pressed.connect(func() -> void: details_requested.emit(row))
+	top.add_child(open_details)
+	card.set_slot(0, d.type in ["scene", "menu"] and not row.has("script_field"), 0, Color("d6a86b"), false, 0, Color.WHITE)
+	card.add_child(_flow_line("STARTS", "", true))
+	for sentence: String in StoryFlow.starts(row, workspace): card.add_child(_flow_line(sentence, sentence))
+	var slot := card.get_child_count()
+	card.add_child(_flow_line("▶ Then", "The story begins: follow the line.", true))
+	card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("8fb9cf"))
+
+## Draws the flow of the story in focus: one node for each part of it.
+func _build_flow() -> void:
+	for child: Node in graph.get_children():
+		if child is GraphNode and flow_names.has(child.name):
+			graph.remove_child(child)
+			child.queue_free()
+	flow_names.clear()
+	flow = null
+	if focus_card.is_empty() or not graph_rows.has(focus_card): return
+	flow = StoryFlow.build(graph_rows[focus_card], workspace)
+	for item: Dictionary in flow.nodes:
+		var card := GraphNode.new()
+		card.name = str(item.name)
+		card.title = str(item.icon) + " " + str(item.title)
+		card.custom_minimum_size.x = StoryFlow.WIDTH
+		card.tooltip_text = "Click to find this in the blocks on the right."
+		_tint(card, str(item.kind))
+		var rows: Array = item.rows
+		for index in rows.size():
+			var line: Dictionary = rows[index]
+			card.add_child(_flow_line(str(line.text), str(line.get("tip", "")), line.get("muted", false), line.get("prose", false)))
+			var way: String = line.get("port", {}).get("kind", "")
+			card.set_slot(index, index == 0, 0, Color("d6a86b"), not way.is_empty(), 0, Color("e8a660") if way in ["response", "continuation", "play"] else Color("8fb9cf"))
+		graph.add_child(card)
+		flow_names[card.name] = item
+
+## Puts the story in focus top left with its flow, the stories it leads to on
+## the right of the flow, and the other cards in rows underneath.
+func _place_focus() -> void:
+	if flow == null or focus_card.is_empty(): return
+	var start := graph.get_node_or_null(NodePath(focus_card)) as GraphNode
+	if start == null: return
+	start.position_offset = FLOW_ORIGIN
+	var low := maxf(flow.bottom, maxf(170.0, start.get_combined_minimum_size().y))
+	for name: StringName in flow_names:
+		var item: Dictionary = flow_names[name]
+		(graph.get_node(NodePath(name)) as GraphNode).position_offset = FLOW_ORIGIN + Vector2(int(item.column) * StoryFlow.COLUMN, float(item.y))
+	var leads_to := flow.targets()
+	var right := FLOW_ORIGIN + Vector2((flow.columns + 0.25) * StoryFlow.COLUMN, 0)
+	var under := Vector2(FLOW_ORIGIN.x, FLOW_ORIGIN.y + low + 90.0)
+	var column := 0
+	var tallest := 0.0
+	for name: StringName in graph_rows:
+		if name == focus_card: continue
+		var card := graph.get_node_or_null(NodePath(name)) as GraphNode
+		if card == null: continue
+		var row: Dictionary = graph_rows[name]
+		var height := maxf(130.0, card.get_combined_minimum_size().y)
+		if destinations.get(str(row.def.id), StringName()) == name and str(row.def.id) in leads_to:
+			card.position_offset = right
+			right.y += minf(height, 260.0) + 30.0
+		else:
+			card.position_offset = under + Vector2(column * 300.0, 0)
+			tallest = maxf(tallest, minf(height, 260.0))
+			column += 1
+			if column == 4:
+				column = 0
+				under.y += tallest + 40.0
+				tallest = 0.0
+
+## A click on the board: a part of the flow is found in the side editor, and
+## another story's card opens that story.
+func _node_selected(node: Node) -> void:
+	if flow_names.has(node.name):
+		block_requested.emit(int(flow_names[node.name].line))
+		return
+	if not _flow_drawn or node.name == focus_card or not graph_rows.has(node.name): return
+	var card := node as GraphNode
+	var at := card.position_offset
+	while Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		await get_tree().process_frame
+	# A card that was dragged was moved, not chosen.
+	if not is_instance_valid(card) or not card.is_inside_tree() or card.position_offset != at or not graph_rows.has(card.name): return
+	var row: Dictionary = graph_rows[card.name]
+	if row.has("script_field"): focus_script(row, str(row.script_field))
+	else: focus_definition(row)
 
 ## Draws the lines between the cards again.
 func _connect_cards() -> void:
 	graph.clear_connections()
+	if flow != null and _flow_drawn:
+		for link: Dictionary in flow.links:
+			var from: StringName = focus_card if link.from == "start" else StringName(str(link.from))
+			if link.has("to"): graph.connect_node(from, int(link.port), StringName(str(link.to)), 0)
+			elif destinations.has(link.story): graph.connect_node(from, int(link.port), destinations[link.story], 0)
 	for from_name: StringName in graph_rows:
 		var row: Dictionary = graph_rows[from_name]
 		var options: Array = graph_options[from_name]
@@ -316,6 +524,12 @@ func _show_context() -> void:
 	if not is_inside_tree(): return
 	await get_tree().process_frame
 	var target := Vector2.ZERO
+	# The small overview helps on a large board; on a narrow one it only covers the story.
+	graph.minimap_enabled = graph_rows.size() + flow_names.size() > 8 and graph.size.x >= 640.0
+	if _flow_drawn and flow != null:
+		# As much of the flow as fits, without making its words too small to read.
+		var wide := FLOW_ORIGIN.x * 2.0 + flow.columns * StoryFlow.COLUMN + (StoryFlow.COLUMN if not flow.targets().is_empty() else 0.0)
+		graph.zoom = clampf((graph.size.x - 20.0) / wide, 0.7, 1.0)
 	for name: StringName in graph_rows:
 		if not context_row.is_empty() and _row_key(graph_rows[name]) == _row_key(context_row):
 			var card := graph.get_node_or_null(NodePath(name)) as GraphNode
@@ -323,6 +537,10 @@ func _show_context() -> void:
 				card.selected = true
 				target = card.position_offset * graph.zoom - Vector2(30, 30)
 	graph.scroll_offset = Vector2(maxf(0.0, target.x), maxf(0.0, target.y))
+
+## Which story a row is: its content and the part of it that is the story.
+func _story_key(row: Dictionary) -> String:
+	return "%s|%s|%s|%s|%d|%s" % [row.doc.path, row.def.type, row.def.id, row.def.mode, row.get("ordinal", 0), StoryBlocks.script_key(row)]
 
 func _row_key(row: Dictionary) -> String:
 	var identity := "%s|%s|%s|%s|%d|%s" % [row.doc.path, row.def.type, row.def.id, row.def.mode, row.get("ordinal", 0), row.get("script_field", "")]
@@ -345,6 +563,8 @@ func _load_layout() -> void:
 			positions[key] = value
 
 func _moved(_from: Vector2, to: Vector2, key: String) -> void:
+	# Around a story in focus the cards are placed by the board: only the board of all stories keeps where they were put.
+	if _flow_drawn: return
 	positions[key] = to
 	_save_layout()
 
@@ -690,60 +910,15 @@ func _add_bubble(parent: Node, row: Dictionary, passage: Dictionary, caption: St
 		parent.add_child(tools)
 
 func _build_long_writer() -> void:
-	writing_window = Window.new()
-	writing_window.visible = false
-	writing_window.title = "Writing space"
-	writing_window.transient = true
-	writing_window.exclusive = true
-	writing_window.min_size = Vector2i(440, 320)
-	writing_window.close_requested.connect(_cancel_long_writer)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 16)
-	writing_window.add_child(margin)
-	var layout := VBoxContainer.new()
-	layout.add_theme_constant_override("separation", 10)
-	margin.add_child(layout)
-	var hint := Label.new()
-	hint.text = "Write as much as you need. Blank lines create separate paragraphs."
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	layout.add_child(hint)
-	writing_text = TextEdit.new()
-	writing_text.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	writing_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	writing_text.add_theme_font_size_override("font_size", 18)
-	writing_text.add_theme_font_override("font", EditorTheme.font("Literata.ttf"))
-	writing_text.text_changed.connect(_update_writing_count)
-	layout.add_child(writing_text)
-	writing_error = Label.new()
-	writing_error.theme_type_variation = "ErrorLabel"
-	writing_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	layout.add_child(writing_error)
-	var footer := HBoxContainer.new()
-	writing_count = Label.new()
-	writing_count.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(writing_count)
-	var cancel := Button.new()
-	cancel.text = "Cancel"
-	cancel.pressed.connect(_cancel_long_writer)
-	footer.add_child(cancel)
-	var apply := Button.new()
-	apply.text = "Apply text"
-	apply.pressed.connect(_apply_long_writer)
-	footer.add_child(apply)
-	layout.add_child(footer)
-	writing_discard = ConfirmationDialog.new()
-	writing_discard.title = "Discard writing?"
-	writing_discard.dialog_text = "Your changes in this writing space have not been applied."
-	writing_discard.ok_button_text = "Discard"
-	writing_discard.confirmed.connect(writing_window.hide)
-	writing_window.add_child(writing_discard)
+	writing_window = WritingWindow.new()
 	add_child(writing_window)
+	writing_text = writing_window.input
+	writing_error = writing_window.error
+	writing_count = writing_window.count
+	writing_discard = writing_window.discard
 
 func _open_long_writer(row: Dictionary, passage: Dictionary) -> void:
 	writing_new_field = ""
-	writing_window.title = "Writing space"
 	var current := _fresh_row(row)
 	if current.is_empty():
 		problem.emit("This story changed. Reopen it before editing.")
@@ -760,16 +935,12 @@ func _open_long_writer(row: Dictionary, passage: Dictionary) -> void:
 				return
 			writing_row = current
 			writing_passage = candidate
-			writing_error.text = ""
-			writing_text.text = str(block.text)
-			writing_original = writing_text.text
-			_update_writing_count()
-			var available := get_window().size
-			writing_window.popup_centered(Vector2i(maxi(440, int(available.x * 0.8)), maxi(320, int(available.y * 0.8))))
-			writing_text.grab_focus()
+			writing_original = str(block.text)
+			writing_window.open(workspace, {"title": "Change the text · " + Wording.title(current), "text": writing_original, "apply": _keep_writing})
 			return
 	problem.emit("This passage changed. Reopen it before editing.")
 
+## Opens the writing window for a story that does not exist yet (an item's use, a character's talk).
 func start_writing(row: Dictionary, field: String) -> void:
 	var current := _fresh_row(row)
 	if current.is_empty() or not current.doc.writable or current.def.fields.has(field): return
@@ -777,36 +948,22 @@ func start_writing(row: Dictionary, field: String) -> void:
 	writing_new_field = field
 	writing_passage = {}
 	writing_original = ""
-	writing_error.text = ""
-	writing_text.text = ""
-	writing_text.placeholder_text = "Write the beginning of this interaction…"
-	_update_writing_count()
-	var available := get_window().size
-	writing_window.title = "Start writing · " + field.capitalize()
-	writing_window.popup_centered(Vector2i(maxi(440, int(available.x * 0.8)), maxi(320, int(available.y * 0.8))))
-	writing_text.grab_focus()
+	writing_window.open(workspace, {"title": "Start writing · %s · %s" % [Wording.title(current), field.capitalize()], "text": "", "placeholder": "Write the beginning of this interaction…", "apply": _keep_writing})
 
-func _update_writing_count() -> void:
-	if writing_count != null:
-		writing_count.text = "%d words" % writing_text.text.replace("\n", " ").replace("\t", " ").split(" ", false).size()
+## Keeps what was written in the window; a problem leaves the window open with the draft.
+func _keep_writing(value: String) -> String:
+	var current := _fresh_row(writing_row)
+	if current.is_empty(): return "This story changed. Copy your draft and reopen it before applying."
+	var error := StoryGraph.start_script(current, writing_new_field, value) if not writing_new_field.is_empty() else StoryGraph.set_prose_block(current, writing_passage, writing_original, value)
+	if not error.is_empty(): return error
+	_finish(current, "")
+	return ""
 
 func _cancel_long_writer() -> void:
-	if writing_text.text != writing_original:
-		writing_discard.popup_centered()
-	else:
-		writing_window.hide()
+	writing_window.cancel()
 
 func _apply_long_writer() -> void:
-	var current := _fresh_row(writing_row)
-	if current.is_empty():
-		writing_error.text = "This story changed. Copy your draft and reopen it before applying."
-		return
-	var error := StoryGraph.start_script(current, writing_new_field, writing_text.text) if not writing_new_field.is_empty() else StoryGraph.set_prose_block(current, writing_passage, writing_original, writing_text.text)
-	if not error.is_empty():
-		writing_error.text = error
-		return
-	writing_window.hide()
-	_finish(current, "")
+	writing_window.apply()
 
 func _bubble_edit(value: String, can_edit: bool) -> TextEdit:
 	var box := TextEdit.new()
@@ -974,7 +1131,39 @@ func _remove_response() -> void:
 		"effect": _finish(current, StoryGraph.set_effect(current, remove_action, ""))
 		_: _finish(current, StoryGraph.remove_choice(current, option))
 
+## A way out of the flow is dragged to a story (`to`), or with `to` empty its link is removed.
+func _rewire_flow(from: StringName, port: int, to: StringName) -> void:
+	var source := _fresh_row(graph_rows.get(focus_card, {}))
+	if source.is_empty() or not source.doc.writable:
+		problem.emit("Choose a story in your working pack to change its links.")
+		return
+	if not to.is_empty() and not graph_rows.has(to):
+		problem.emit("Drag the dot to the card of another story.")
+		return
+	var target_id := str(graph_rows[to].def.id) if not to.is_empty() else ""
+	var way := flow.port(str(from), port) if flow_names.has(from) else {}
+	var error := ""
+	match str(way.get("kind", "")):
+		"response":
+			var option := _fresh_option(source, int(way.line))
+			if option.is_empty():
+				problem.emit("This response changed. Reopen it before linking.")
+				return
+			error = StoryGraph.set_transition(source, option, target_id)
+		"continuation": error = StoryGraph.set_primary_transition(source, target_id)
+		"play": error = StoryGraph.set_play_target(source, way.node, target_id)
+		_:
+			problem.emit("This way follows from the blocks themselves. To send the story somewhere else from here, add “Go to another story” in the blocks on the right.")
+			return
+	if error.is_empty() and not to.is_empty() and graph_rows[to].root != workspace.target:
+		var dependency_error := workspace.add_requirement(graph_rows[to].pack)
+		if not dependency_error.is_empty(): problem.emit("The link was made. Add the reference pack as a dependency: " + dependency_error)
+	_finish(source, error)
+
 func _connect_response(from: StringName, port: int, to: StringName, _to_port: int) -> void:
+	if _flow_drawn and (flow_names.has(from) or from == focus_card):
+		_rewire_flow(from, port, to)
+		return
 	if not graph_rows.has(from) or not graph_rows.has(to):
 		return
 	var source: Dictionary = _fresh_row(graph_rows[from])
@@ -1005,6 +1194,9 @@ func _connect_response(from: StringName, port: int, to: StringName, _to_port: in
 	_finish(source, error)
 
 func _disconnect_response(from: StringName, port: int, _to: StringName, _to_port: int) -> void:
+	if _flow_drawn and (flow_names.has(from) or from == focus_card):
+		_rewire_flow(from, port, StringName())
+		return
 	if not graph_rows.has(from) or not graph_options.has(from):
 		return
 	var source: Dictionary = _fresh_row(graph_rows[from])

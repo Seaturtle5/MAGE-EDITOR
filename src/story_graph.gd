@@ -529,8 +529,10 @@ static func start_script(row: Dictionary, field: String, value: String) -> Strin
 	value = value.replace("\r\n", "\n").strip_edges()
 	if value.is_empty(): return "Enter some story text."
 	for line: String in value.split("\n"):
-		if _is_statement(line.strip_edges()) or "[" in line or "]" in line:
-			return "Use ordinary prose here. Add choices, actions and variations on the story board."
+		if _is_statement(line.strip_edges()):
+			return "A line here starts like an action or a response. Write the words first; add actions and responses as blocks afterwards."
+	var unreadable := WritingWindow.problem_in(value)
+	if not unreadable.is_empty(): return unreadable
 	return row.doc.set_field(row.def, field, value, true)
 
 static func add_condition(row: Dictionary, option: Dictionary, condition: String) -> String:

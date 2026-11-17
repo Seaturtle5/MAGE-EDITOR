@@ -1784,6 +1784,8 @@ func _build_graph_tab() -> void:
 		story_editor.visible = tabs.current_tab == 3
 		_refresh_crumbs())
 	story_canvas.problem.connect(_show_error)
+	story_canvas.block_requested.connect(func(line: int) -> void:
+		if story_editor != null and story_editor.visible: story_editor.focus_source_line(line))
 	story_canvas.new_story_requested.connect(_new_story_node)
 	story_canvas.next_story_requested.connect(_new_next_story)
 
@@ -1857,8 +1859,16 @@ func _open_visual_script(row: Dictionary, field: String) -> void:
 	if not row.def.fields.has(field) and ContentDB.SCHEMA.get(row.def.type, {}).get(field, "") == "script" and row.doc.writable:
 		story_canvas.start_writing(row, field)
 
+## The board waits to be looked at when no story is in focus: a pack's first
+## hundred stories are not drawn behind another page.
+var board_stale := false
+
 func _refresh_graph() -> void:
 	if story_canvas != null:
+		if tabs.current_tab != 3 and story_canvas.focused_id.is_empty() and not story_canvas.show_everything:
+			board_stale = true
+			return
+		board_stale = false
 		var timing := Perf.start()
 		story_canvas.refresh()
 		Perf.stop("window: board", timing)
@@ -2120,6 +2130,7 @@ func _entries_ready() -> bool:
 func _on_tab_changed(index: int) -> void:
 	if index <= 2 and technical_stale: _refresh_technical()
 	if index == 4 and visual_details != null: visual_details.draw_if_stale()
+	if index == 3 and board_stale: _refresh_graph()
 	if story_editor != null: story_editor.visible = index == 3 and not story_editor.row.is_empty()
 	for key: int in nav_buttons: nav_buttons[key].set_pressed_no_signal(key == index)
 	_refresh_content_tools()
@@ -2180,7 +2191,7 @@ func _build_workflow() -> void:
 	drops.applied.connect(_on_canvas_changed)
 	drops.open_requested.connect(_open_world_content)
 	story_canvas.graph.content_dropped.connect(_story_drop)
-	world_canvas.graph.content_dropped.connect(_map_drop)
+	world_canvas.surface.content_dropped.connect(_map_drop)
 	wizard = TaskWizard.new()
 	add_child(wizard)
 	wizard.created.connect(func(result: Dictionary) -> void:
@@ -2386,10 +2397,5 @@ func _story_drop(data: Dictionary, position: Vector2) -> void:
 func _map_drop(data: Dictionary, position: Vector2) -> void:
 	var content := DragPayload.resolve(workspace, data)
 	if content.is_empty(): return
-	var target: Dictionary = {}
-	for node: StringName in world_canvas.rows_by_node:
-		var card := world_canvas.graph.get_node(NodePath(node)) as Control
-		if card != null and Rect2(card.position, card.size * world_canvas.graph.zoom).has_point(position):
-			target = world_canvas.rows_by_node[node]
-			break
+	var target: Dictionary = world_canvas.places_by_id.get(world_canvas.surface.place_at(position), {})
 	drops.open(workspace, content, target)

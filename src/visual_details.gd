@@ -945,6 +945,7 @@ func _add_field(key: String, kind: String) -> void:
 		description.editable = doc.writable
 		description.focus_exited.connect(_save_text.bind(key, description))
 		body.add_child(description)
+		_add_writing_button(key, description, true)
 		return
 	if kind == "script" or kind == "menu":
 		var story := Button.new()
@@ -966,6 +967,7 @@ func _add_field(key: String, kind: String) -> void:
 		long_text.editable = doc.writable and (field == null or not _field_has_comments(doc, field))
 		long_text.focus_exited.connect(_save_text.bind(key, long_text))
 		body.add_child(long_text)
+		_add_writing_button(key, long_text, key in MESSAGE_FIELDS.get(d.type, []))
 		return
 	if REFERENCES.has(key) and kind in ["text", "list"] and (field == null or field.children.is_empty()) and RegEx.create_from_string("^[a-z0-9_.-]+(, ?[a-z0-9_.-]+)*$|^$").search(value) != null:
 		_add_reference_field(key, kind == "list", value)
@@ -1019,6 +1021,27 @@ func _add_field(key: String, kind: String) -> void:
 
 ## Other content this content names (its picture, its home, the areas it is
 ## found in): chosen by name from the loaded packs, or dropped from the library.
+var writing: WritingWindow
+
+## A way from a small text box to the large writing window. `markup` says
+## whether the game reads names, emphasis and words that vary in this text.
+func _add_writing_button(key: String, box: TextEdit, markup: bool) -> void:
+	if not box.editable: return
+	var open := Button.new()
+	open.text = "⤢ Write in a large window"
+	open.theme_type_variation = "Ghost"
+	open.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	open.tooltip_text = "Open a large window to write this in" + (", with tools for names, emphasis and words that vary." if markup else ".")
+	var owner_title := Wording.title(row)
+	open.pressed.connect(func() -> void:
+		if writing == null:
+			writing = WritingWindow.new()
+			add_child(writing)
+		writing.open(workspace, {"title": "%s · %s" % [owner_title, key.capitalize()], "text": box.text, "markup": markup, "hint": "An empty line starts a new paragraph." if not markup else "An empty line starts a new paragraph. Select words, then choose a tool to change how they are shown.", "apply": func(value: String) -> String:
+			if is_instance_valid(box): box.text = value
+			return "" if _set_value(key, value) else "This could not be kept as it is."}))
+	body.add_child(open)
+
 func _add_reference_field(key: String, several: bool, value: String) -> void:
 	var types: Array = REFERENCES[key]
 	if not row.doc.writable:

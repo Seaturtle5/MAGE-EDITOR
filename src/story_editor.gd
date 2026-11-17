@@ -34,7 +34,8 @@ var explain: AcceptDialog
 var pending: Callable
 var check_timer: Timer
 var checked_revision := -1
-var writer: VBoxContainer
+var writer: WritingWindow
+var writing: WritingWindow
 var writer_text: TextEdit
 var writer_done: Callable
 var focus_line := -1
@@ -91,6 +92,10 @@ func _ready() -> void:
 	add_child(conditions)
 	conditions.applied.connect(func(condition: String) -> void:
 		if pending.is_valid(): pending.call(condition, false))
+	writing = WritingWindow.new()
+	add_child(writing)
+	writing.visibility_changed.connect(func() -> void:
+		if not writing.visible: writer = null)
 	explain = AcceptDialog.new()
 	explain.title = "About this block"
 	add_child(explain)
@@ -191,7 +196,7 @@ func complete() -> void:
 func refresh() -> void:
 	if blocks == null or workspace == null: return
 	drawn_revision = workspace.revision
-	writer = null
+	if writing == null or not writing.visible: writer = null
 	var view := _lines_in_view() if not row.is_empty() and _drawn_path == str(row.doc.path) + "#" + str(row.def.id) + "#" + str(row.get("script_field", "")) else Vector2i.ZERO
 	if _heights.size() > 4000: _heights.clear()
 	waiting.clear()
@@ -1102,128 +1107,42 @@ func _show_badges() -> void:
 
 # ------------------------------------------------------------------ writing
 
-## Writes prose in place: an existing passage (entry) or a new one at a spot.
-func _write(entry: Dictionary, spot: Dictionary = {}, replace: Control = null) -> void:
+## Opens the writing window on a passage (entry) or for a new one at a spot.
+func _write(entry: Dictionary, spot: Dictionary = {}, _replace: Control = null) -> void:
 	if not row.doc.writable: return
-	if writer != null and is_instance_valid(writer): writer.queue_free()
-	var host: Control = replace if replace != null else panels.get(entry.get("key", ""), null)
-	var hides := host != null
-	if host == null and spot.has("line"):
-		for other: Dictionary in entries:
-			if int(other.line) == int(spot.line) and panels.has(other.key): host = panels[other.key]
-	var box := VBoxContainer.new()
-	writer = box
-	var input := TextEdit.new()
-	writer_text = input
-	input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	input.scroll_fit_content_height = true
-	input.custom_minimum_size.y = 84
-	input.theme_type_variation = "StoryBubble"
-	input.placeholder_text = "Write what the player reads. An empty line starts a new paragraph."
 	var original := StoryBlocks.source(row, entry) if not entry.is_empty() else ""
-	input.text = original
-	box.add_child(input)
-	var tools := HBoxContainer.new()
-	box.add_child(tools)
-	var insert := MenuButton.new()
-	insert.text = "Insert ▾"
-	insert.flat = false
-	insert.tooltip_text = "Insert words that change: a name, he or she, a counter's number."
-	var words := [["The player's name", "[name of player]"], ["A character's name…", "name"], ["He / she / they for a character…", "he"], ["Him / her / them…", "him"], ["His / her / their…", "his"], ["A counter's number…", "value"], ["Emphasis (italic)", "*"], ["Strong (bold)", "**"]]
-	for pair: Array in words: insert.get_popup().add_item(pair[0])
-	insert.get_popup().id_pressed.connect(func(id: int) -> void: _insert_markup(input, words[id][1]))
-	tools.add_child(insert)
-	var vary := _ghost("Vary", "Offer several versions of the selected words; the game picks one each time.", "AddRow")
-	vary.pressed.connect(func() -> void:
-		var chosen := input.get_selected_text() if input.has_selection() else "one version"
-		input.insert_text_at_caret("[one of]" + chosen + "[or]another version[at random]"))
-	tools.add_child(vary)
-	var only := _ghost("Only if…", "Show the selected words only when a condition holds.", "AddRow")
-	only.pressed.connect(func() -> void:
-		var chosen := input.get_selected_text() if input.has_selection() else "these words"
-		_ask_condition("", "Show these words only if…", func(condition: String) -> void: input.insert_text_at_caret("[if " + condition + "]" + chosen + "[else]other words[end if]")))
-	tools.add_child(only)
-	var count := AuthoringLayout.label("", 12, true)
-	count.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	count.autowrap_mode = TextServer.AUTOWRAP_OFF
-	tools.add_child(count)
-	var recount := func() -> void: count.text = "%d words" % input.text.split(" ", false).size() if not input.text.strip_edges().is_empty() else ""
-	input.text_changed.connect(recount)
-	recount.call()
-	var cancel := _ghost("Cancel", "Leave the text as it was (Esc).", "AddRow")
-	tools.add_child(cancel)
-	var apply := Button.new()
-	apply.text = "Done"
-	apply.theme_type_variation = "PrimaryButton"
-	apply.tooltip_text = "Keep this text (Ctrl+Enter)."
-	tools.add_child(apply)
-	var message := AuthoringLayout.label("", 13)
-	message.theme_type_variation = "ErrorLabel"
-	box.add_child(message)
-	var close := func() -> void:
-		writer = null
-		refresh()
-	writer_done = func() -> void:
-		var value := input.text
-		if not entry.is_empty() and value.strip_edges() == original.strip_edges():
-			close.call()
-			return
-		if row.doc.text != snapshot:
-			message.text = "This story changed meanwhile. Copy your text, then choose the story again."
-			return
-		var error := workspace.transaction("Write text", func() -> String:
-			var issue := StoryBlocks.set_text(row, entry, value, snapshot) if not entry.is_empty() else StoryBlocks.insert(row, spot, value.replace("\r\n", "\n").strip_edges(), snapshot) if _prose_only(value).is_empty() else _prose_only(value)
-			if not issue.is_empty(): return issue
-			var parsed := FscParser.parse(row.doc.text, row.doc.path)
-			return str(parsed.diagnostics[0].message) if not parsed.ok() else "")
-		if not error.is_empty():
-			message.text = error
-			return
-		writer = null
-		refresh()
-		changed.emit(row)
-	apply.pressed.connect(writer_done)
-	cancel.pressed.connect(close)
-	input.gui_input.connect(func(event: InputEvent) -> void:
-		if event is InputEventKey and event.pressed:
-			if event.keycode == KEY_ESCAPE:
-				close.call()
-				input.accept_event()
-			elif event.keycode == KEY_ENTER and (event.ctrl_pressed or event.meta_pressed):
-				writer_done.call()
-				input.accept_event())
-	if host != null and host.get_parent() != null:
-		var parent := host.get_parent()
-		parent.add_child(box)
-		parent.move_child(box, host.get_index())
-		if hides: host.hide()
-	else: blocks.add_child(box)
-	input.grab_focus()
-	_reveal.call_deferred(box)
+	var taken := snapshot
+	var story := row
+	writer = writing
+	writer_text = writing.input
+	writer_done = writing.apply
+	writing.open(workspace, {
+		"title": ("Write · " if entry.is_empty() else "Change the text · ") + heading.text,
+		"text": original,
+		"placeholder": "Write what the player reads. An empty line starts a new paragraph.",
+		"context": StoryBlocks.contexts(row),
+		"event": row.def.id if row.def.type == "event" else "",
+		"sample": preview.preset,
+		"check": func(value: String) -> String: return "" if value.strip_edges().is_empty() else _prose_only(value),
+		"apply": func(value: String) -> String:
+			if not entry.is_empty() and value.strip_edges() == original.strip_edges(): return ""
+			if story.doc.text != taken: return "This story changed meanwhile. Copy your text, then choose the story again."
+			var error := workspace.transaction("Write text", func() -> String:
+				var issue := StoryBlocks.set_text(story, entry, value, taken) if not entry.is_empty() else StoryBlocks.insert(story, spot, value.replace("\r\n", "\n").strip_edges(), taken) if _prose_only(value).is_empty() else _prose_only(value)
+				if not issue.is_empty(): return issue
+				var parsed := FscParser.parse(story.doc.text, story.doc.path)
+				return str(parsed.diagnostics[0].message) if not parsed.ok() else "")
+			if not error.is_empty(): return error
+			writer = null
+			refresh()
+			changed.emit(story)
+			return ""})
 
 static func _prose_only(value: String) -> String:
 	if value.strip_edges().is_empty(): return "Write some text first."
 	for line: String in value.split("\n"):
 		if StoryGraph._is_statement(line.strip_edges()): return "A line here starts like an action or a response. Add those with “Action” or “More” instead."
 	return ""
-
-func _insert_markup(input: TextEdit, what: String) -> void:
-	if what.begins_with("["):
-		input.insert_text_at_caret(what)
-		return
-	if what in ["*", "**"]:
-		input.insert_text_at_caret(what + (input.get_selected_text() if input.has_selection() else "words") + what)
-		return
-	var spec := {"name": "pick", "kind": "value.number" if what == "value" else "who", "default": "", "hidden": false, "optional": false}
-	var control := SlotControl.make(workspace, spec, "")
-	control.hide()
-	add_child(control)
-	control.edited.connect(func() -> void:
-		input.insert_text_at_caret("[" + control.value() + "]" if what == "value" else "[" + what + " of " + control.value() + "]")
-		input.grab_focus()
-		control.queue_free())
-	control.picker.open(_pointer())
 
 # ---------------------------------------------------------------- responses
 

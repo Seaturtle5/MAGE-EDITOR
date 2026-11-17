@@ -367,6 +367,10 @@ func _adopt(read: Dictionary) -> void:
 			_reference_keys.append(row.sort)
 			_reference_index[row_key(row.doc.path, row.def.type, row.def.id, row.def.mode, row.ordinal)] = row
 		_reference_cache_key = "|".join(pack_paths) + "|" + str(documents.size())
+		if read.has("links"):
+			# Found while loading, for these very rows.
+			_link_cache = read.links
+			_link_cache_key = _reference_cache_key
 	_base = read.get("base", null)
 	_base_key = _reference_cache_key if _base != null and first else "-"
 	_other_problems.clear()
@@ -402,6 +406,16 @@ func _load_job(job: Dictionary) -> void:
 				by_pack[folder].append(path)
 				break
 	read.base = build_base(found, job.target_id, by_pack, results)
+	# Where the other packs' stories lead is found here too: on the window's
+	# thread it stops the window for seconds when a whole game arrives.
+	var by_path: Dictionary = {}
+	for row: Dictionary in read.rows:
+		if not by_path.has(row.doc.path): by_path[row.doc.path] = []
+		by_path[row.doc.path].append(row)
+	var pattern := RegEx.create_from_string(_link_pattern.get_pattern())
+	var links: Array[Dictionary] = []
+	for path: String in paths: links.append_array(links_in(read.documents[path], by_path.get(path, []), pattern))
+	read.links = links
 	read.job = job
 	_load_result = read
 
@@ -989,7 +1003,8 @@ func links_touching(id: String) -> Array:
 
 ## The links of one file: its text is searched in one go, and each find is
 ## given to the definition whose lines hold it. `entries` are the file's rows.
-static func links_in(doc: PackDocument, entries: Array) -> Array[Dictionary]:
+static func links_in(doc: PackDocument, entries: Array, pattern: RegEx = null) -> Array[Dictionary]:
+	if pattern == null: pattern = _link_pattern
 	var out: Array[Dictionary] = []
 	var text: String = doc.text
 	if entries.is_empty() or ("->" not in text and "play " not in text): return out
@@ -999,7 +1014,7 @@ static func links_in(doc: PackDocument, entries: Array) -> Array[Dictionary]:
 	var line := 1
 	var counted := 0
 	var last_line := 0
-	for matched: RegExMatch in _link_pattern.search_all(text):
+	for matched: RegExMatch in pattern.search_all(text):
 		var at := matched.get_start()
 		line += text.count("\n", counted, at) if at > counted else 0
 		counted = at
