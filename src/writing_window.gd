@@ -33,6 +33,7 @@ var _event := ""
 var _then: Callable
 var _timer: Timer
 var _body: HBoxContainer
+var _back: Panel
 
 func _init() -> void:
 	visible = false
@@ -44,10 +45,9 @@ func _init() -> void:
 	size_changed.connect(_fit)
 
 func _ready() -> void:
-	var back := Panel.new()
-	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	back.add_theme_stylebox_override("panel", EditorTheme.box("surface", "", 0, 0))
-	add_child(back)
+	_back = Panel.new()
+	_back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_back)
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side: String in ["margin_left", "margin_right", "margin_top", "margin_bottom"]: margin.add_theme_constant_override(side, 14)
@@ -252,6 +252,9 @@ func _build_toolbar() -> void:
 ## conditions).
 func open(pack: PackWorkspace, options: Dictionary) -> void:
 	workspace = pack
+	# The colours of the theme as it is now: it may have been changed since the window was made.
+	_back.add_theme_stylebox_override("panel", EditorTheme.box("surface", "", 0, 0))
+	input.syntax_highlighter = _highlighter()
 	title = str(options.get("title", "Writing"))
 	original = str(options.get("text", ""))
 	_apply = options.get("apply", Callable())

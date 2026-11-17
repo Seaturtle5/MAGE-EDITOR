@@ -178,6 +178,9 @@ func _change_theme(index: int) -> void:
 	theme = EditorTheme.build()
 	background.color = EditorTheme.color("bg")
 	_refresh_all()
+	# What was drawn in the other theme's colours is drawn again.
+	if story_editor != null and not story_editor.row.is_empty(): story_editor.refresh()
+	if world_canvas != null and world_canvas.surface != null: world_canvas.surface.queue_redraw()
 	var preferences := ConfigFile.new()
 	var path := OS.get_user_data_dir().path_join("preferences.cfg")
 	preferences.load(path)
@@ -1060,7 +1063,7 @@ var library_mark := ""
 
 ## What the library lists, as text: it is filled again only when this changes.
 func _library_mark() -> String:
-	var parts: PackedStringArray = [group, search.text, workspace._reference_cache_key, str(workspace.rows.size())]
+	var parts: PackedStringArray = [group, search.text, workspace._reference_cache_key, str(workspace.rows.size()), str(EditorTheme.light)]
 	for path: String in workspace._own_rows:
 		for row: Dictionary in workspace._own_rows[path].rows:
 			parts.append(str(row.sort) + "=" + (str(row.def.fields.name.value) if row.def.fields.has("name") else "") + str(row.def.mode))

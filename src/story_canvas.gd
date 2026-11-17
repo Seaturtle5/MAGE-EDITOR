@@ -194,7 +194,7 @@ var destinations: Dictionary = {}
 ## What a card shows, as text: a card is drawn again only when this changes.
 func _card_mark(row: Dictionary) -> String:
 	var d: FscParser.Definition = row.def
-	var mark: String = str(row.sort) + "|" + str(row.get("script_field", "")) + "|" + str(str(row.doc.block(d)).hash()) + "|" + str(detailed_cards)
+	var mark: String = str(row.sort) + "|" + str(row.get("script_field", "")) + "|" + str(str(row.doc.block(d)).hash()) + "|" + str(detailed_cards) + "|" + str(EditorTheme.light)
 	if row.doc.writable and d.type in ["scene", "menu"]: mark += "|" + str(workspace.is_used(d.id))
 	return mark
 
@@ -409,12 +409,12 @@ func _build_start(card: GraphNode, row: Dictionary) -> void:
 	open_details.tooltip_text = "Open everything about this content, also when and where it starts."
 	open_details.pressed.connect(func() -> void: details_requested.emit(row))
 	top.add_child(open_details)
-	card.set_slot(0, d.type in ["scene", "menu"] and not row.has("script_field"), 0, Color("d6a86b"), false, 0, Color.WHITE)
+	card.set_slot(0, d.type in ["scene", "menu"] and not row.has("script_field"), 0, EditorTheme.wire("in"), false, 0, Color.WHITE)
 	card.add_child(_flow_line("STARTS", "", true))
 	for sentence: String in StoryFlow.starts(row, workspace): card.add_child(_flow_line(sentence, sentence))
 	var slot := card.get_child_count()
 	card.add_child(_flow_line("▶ Then", "The story begins: follow the line.", true))
-	card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("8fb9cf"))
+	card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("flow"))
 
 ## Draws the flow of the story in focus: one node for each part of it.
 func _build_flow() -> void:
@@ -438,7 +438,7 @@ func _build_flow() -> void:
 			var line: Dictionary = rows[index]
 			card.add_child(_flow_line(str(line.text), str(line.get("tip", "")), line.get("muted", false), line.get("prose", false)))
 			var way: String = line.get("port", {}).get("kind", "")
-			card.set_slot(index, index == 0, 0, Color("d6a86b"), not way.is_empty(), 0, Color("e8a660") if way in ["response", "continuation", "play"] else Color("8fb9cf"))
+			card.set_slot(index, index == 0, 0, EditorTheme.wire("in"), not way.is_empty(), 0, EditorTheme.wire("link") if way in ["response", "continuation", "play"] else EditorTheme.wire("flow"))
 		graph.add_child(card)
 		flow_names[card.name] = item
 
@@ -624,7 +624,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 	open_details.tooltip_text = "Open everything about this content."
 	open_details.pressed.connect(func() -> void: details_requested.emit(row))
 	top.add_child(open_details)
-	card.set_slot(0, d.type in ["scene", "menu"], 0, Color("d6a86b"), false, 0, Color.WHITE)
+	card.set_slot(0, d.type in ["scene", "menu"], 0, EditorTheme.wire("in"), false, 0, Color.WHITE)
 	var entries := StoryGraph.structure(row)
 	var first := ""
 	var counts := {"text": 0, "effect": 0, "if": 0, "fight": 0}
@@ -656,7 +656,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 		response.custom_minimum_size.x = 250
 		var slot := card.get_child_count()
 		card.add_child(response)
-		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("e8a660"))
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("link"))
 	var direct := StoryGraph.primary_transition(row)
 	var is_menu_field: bool = row.has("script_field") and ContentDB.SCHEMA.get(d.type, {}).get(row.script_field, "") == "menu"
 	var has_continuation := not direct.is_empty() or (not is_menu_field and (d.type in ["scene", "event", "character"] or row.has("script_field")))
@@ -668,7 +668,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 		continuation.theme_type_variation = "MutedLabel"
 		var slot := card.get_child_count()
 		card.add_child(continuation)
-		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("8fb9cf"))
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("flow"))
 	graph_play_links[card.name] = calls
 	for action: Dictionary in calls:
 		var play_label := Label.new()
@@ -676,7 +676,7 @@ func _build_summary(card: GraphNode, row: Dictionary) -> void:
 		play_label.add_theme_font_size_override("font_size", 12)
 		var slot := card.get_child_count()
 		card.add_child(play_label)
-		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("a4c9a2"))
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("play"))
 	if row.doc.writable and d.type in ["scene", "menu"] and not row.has("script_field") and not workspace.is_used(d.id):
 		var hint := AuthoringLayout.label("⚠ Nothing leads here yet", 12, true)
 		card.add_child(hint)
@@ -701,7 +701,7 @@ func _build_card(card: GraphNode, row: Dictionary) -> void:
 	image_button.disabled = not writable or (row.has("script_field") and ContentDB.SCHEMA.get(d.type, {}).get(row.script_field, "") == "menu")
 	image_button.pressed.connect(_open_image_picker.bind(row, {}))
 	card.add_child(image_button)
-	card.set_slot(0, d.type in ["scene", "menu"], 0, Color("d6a86b"), false, 0, Color.WHITE)
+	card.set_slot(0, d.type in ["scene", "menu"], 0, EditorTheme.wire("in"), false, 0, Color.WHITE)
 	var speech_count := 0
 	var calls: Array = []
 	for passage: Dictionary in StoryGraph.script_nodes(row):
@@ -837,7 +837,7 @@ func _build_card(card: GraphNode, row: Dictionary) -> void:
 			response.add_child(note)
 		var slot := card.get_child_count()
 		card.add_child(response)
-		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("e8a660"))
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("link"))
 	var direct := StoryGraph.primary_transition(row)
 	var is_menu_field: bool = row.has("script_field") and ContentDB.SCHEMA.get(d.type, {}).get(row.script_field, "") == "menu"
 	var has_continuation := not direct.is_empty() or (not is_menu_field and (d.type in ["scene", "event", "character"] or row.has("script_field")))
@@ -848,7 +848,7 @@ func _build_card(card: GraphNode, row: Dictionary) -> void:
 		continuation.add_theme_font_size_override("font_size", 12)
 		var slot := card.get_child_count()
 		card.add_child(continuation)
-		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("8fb9cf"))
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("flow"))
 	graph_play_links[card.name] = calls
 	for action: Dictionary in calls:
 		var play_label := Label.new()
@@ -856,7 +856,7 @@ func _build_card(card: GraphNode, row: Dictionary) -> void:
 		play_label.add_theme_font_size_override("font_size", 12)
 		var slot := card.get_child_count()
 		card.add_child(play_label)
-		card.set_slot(slot, false, 0, Color.WHITE, true, 0, Color("a4c9a2"))
+		card.set_slot(slot, false, 0, Color.WHITE, true, 0, EditorTheme.wire("play"))
 	var story_action := Button.new()
 	story_action.text = "+ Add action"
 	story_action.disabled = not writable or is_menu_field or (d.type == "menu" and not row.has("script_field"))

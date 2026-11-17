@@ -91,12 +91,13 @@ func _covered(point: Vector2) -> bool:
 func _draw() -> void:
 	var zoom := graph.zoom if graph != null else 1.0
 	var radius := clampf(4.8 * zoom, 3.6, 5.2)
-	var ring := Color(EditorTheme.color("bg"), 0.85)
+	var ring := Color(EditorTheme.color("well"), 0.9)
 	var spacing := SPACING * clampf(zoom, 0.7, 1.0)
 	for line: Dictionary in lines:
 		var total: float = line.total
 		if total < 26.0: continue
-		var colour: Color = (line.colour as Color).lightened(0.62)
+		# Paler than its line on the dark theme, deeper than it on the light one: either way it stands out.
+		var colour: Color = (line.colour as Color).darkened(0.5) if EditorTheme.light else (line.colour as Color).lightened(0.62)
 		if still:
 			# Arrowheads that stay where they are: one in the middle of a short line, more on a long one.
 			var heads := maxi(1, int(total / (spacing * 2.2)))

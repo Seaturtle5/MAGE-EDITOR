@@ -33,6 +33,14 @@ Standalone Godot 4.7 desktop authoring tool for MAGE packs. Authors build all pa
 | `content_tools.gd`, `content_actions.gd` | Rename everywhere (prose untouched, taken back if it would break references), duplicate, delete with its consequences, where-used, the quest view. `ContentTools.map_code` decides which parts of a line hold IDs; rename and the uses index share it. |
 | `main.gd`, `content_library.gd`, `command_palette.gd`, `drop_menu.gd`, `drag_payload.gd`, `editor_theme.gd`, `editor_prefs.gd`, `wording.gd` | The window (top bar, library, Home / Stories / Map / Details, side editor, status line), the library tree (an entry opens when the pointer is let go in place, so it can be dragged), Find anything, drops, themes and category colours, remembered settings, the wording table. |
 
+## Colours
+
+Both themes are built in `editor_theme.gd` from one palette of layers, from the back to the front: `bg`, `well` (what is typed or listed in), `surface` (pages and panels), `raised` (buttons, cards), `popup` (menus, dropdowns, pickers, tooltips, the title bars of dialogs). A layer is told from the next by its fill and by a line: `border` around what lies on a page, the stronger `edge` around what floats, which also casts a shadow (`EditorTheme.floating()`). Text is `text`, `muted` (second rank) or `faint` (switched off).
+
+- Never write a colour into a control: take it from `EditorTheme.color()`, `category_color()` or `wire()` (the board's dots and lines), so it is right in both themes. A colour kept on a control (an override, a highlighter) must be set again when the theme changes: `_change_theme` in `main.gd` draws the pages again, and the writing window takes its colours each time it opens.
+- Marks (radio and check marks, arrows, switches) are drawn from SVG in the theme's colours (`EditorTheme.mark()`); the built-in ones only suit a dark background.
+- `theme_test.gd` measures the contrast of text on every layer, of the lines, and of what floats against the page, in both themes. A new palette colour gets a check there.
+
 ## Speed
 
 An edit must be back on screen at once, in a file of a megabyte with sixty packs loaded. Measure before and after (`MAGE_PERF=1` prints the steps' times, see `perf.gd`), on a real large pack, and keep every refresh proportional to what changed:
