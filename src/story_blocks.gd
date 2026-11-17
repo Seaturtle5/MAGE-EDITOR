@@ -31,7 +31,7 @@ static func children(entries: Array[Dictionary], key: String) -> Array[Dictionar
 ## when `parent` is empty. A closing group of responses stays last.
 static func end_spot(row: Dictionary, entries: Array[Dictionary], parent: Dictionary = {}) -> Dictionary:
 	var kids := children(entries, str(parent.get("key", "")))
-	var menu: bool = row.def.type == "menu" and not row.has("script_field")
+	var menu: bool = (row.def.type == "menu" and not row.has("script_field")) or (row.has("script_field") and ContentDB.SCHEMA.get(row.def.type, {}).get(row.script_field, "") == "menu")
 	if parent.is_empty() and menu: kids = kids.filter(func(entry: Dictionary) -> bool: return entry.node.kind != "choices")
 	if not kids.is_empty() and kids[0].node.has("inline_field"): return {"field": kids[0].node.inline_field, "inline": true}
 	if not kids.is_empty():

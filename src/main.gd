@@ -1005,7 +1005,9 @@ func _open_target(path: String) -> void:
 	# The packs that belong with it are loaded behind the scenes; the check follows them.
 	var beside: Array = workspace.packs_beside() if bool(_preference("workspace", "load_beside", true)) else []
 	if not beside.is_empty(): _load_packs(beside)
-	elif workspace.rows.size() > PackWorkspace.LIGHT: workspace.request_check()
+	elif workspace.rows.size() > PackWorkspace.LIGHT:
+		workspace.request_check()
+		_refresh_diagnostics()
 	_navigate(6)
 	_offer_recovery()
 	if DisplayServer.get_name() != "headless" and "--script" not in OS.get_cmdline_args() and not bool(_preference("help", "tour_seen", false)):

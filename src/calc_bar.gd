@@ -51,6 +51,26 @@ func _init() -> void:
 	var random := _tool("🎲 random", "Add a random whole number between two numbers.")
 	random.pressed.connect(func() -> void: _append(["random", "1", "to", "6"]))
 	tools.add_child(random)
+	for function: Array in [["min", "smaller of", "The smaller of two numbers."], ["max", "larger of", "The larger of two numbers."]]:
+		var button := _tool(str(function[1]), str(function[2]))
+		button.pressed.connect(func() -> void: _append([str(function[0]), "(", "1", ",", "2", ")"]))
+		tools.add_child(button)
+	var root := _tool("√", "The whole-number square root of what is in the brackets.")
+	root.pressed.connect(func() -> void: _append(["sqrt", "(", "9", ")"]))
+	tools.add_child(root)
+	for kind: Array in [["+ list size…", "How many entries a list has.", ["count", "of"]], ["+ list entry…", "One entry of a list: the first is number 1.", ["entry", "1", "of"]]]:
+		var list := PickerButton.new()
+		list.placeholder = str(kind[0])
+		list.text = list.placeholder
+		list.theme_type_variation = "AddRow"
+		list.focus_mode = Control.FOCUS_NONE
+		list.tooltip_text = str(kind[1])
+		list.allow_typing = true
+		list.options = func() -> Array: return _value_options("list")
+		list.label_for = func(_value: String) -> String: return list.placeholder
+		list.picked.connect(func(path: String) -> void:
+			if not path.is_empty(): _append((kind[2] as Array) + [path]))
+		tools.add_child(list)
 	var back := _tool("⌫", "Take out the last part.")
 	back.pressed.connect(func() -> void:
 		if _tokens.is_empty(): return
@@ -68,14 +88,15 @@ func _tool(text: String, tooltip: String) -> Button:
 	button.focus_mode = Control.FOCUS_NONE
 	return button
 
-func _value_options() -> Array:
+func _value_options(kind: String = "number") -> Array:
 	var result: Array = []
 	if workspace == null: return result
 	var declared: Dictionary = workspace.preview_content().values
 	var keys: Array = declared.keys()
 	keys.sort()
 	for key: String in keys:
-		if str(declared[key].get("kind", "")) == "number": result.append({"value": key, "label": BlockCatalog.value_label(key, workspace), "detail": "counter"})
+		if str(declared[key].get("kind", "")) == kind: result.append({"value": key, "label": BlockCatalog.value_label(key, workspace), "detail": "counter" if kind == "number" else kind})
+	if kind != "number": return result
 	for key: String in Validator.PLAYER_VALUES:
 		if not declared.has("player." + key): result.append({"value": "player." + key, "label": "the player's " + key.replace("_", " ").replace(".", " "), "detail": "player"})
 	return result

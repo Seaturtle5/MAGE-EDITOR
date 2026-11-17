@@ -71,7 +71,8 @@ static func words(text: String, workspace: PackWorkspace = null) -> String:
 	for matched: RegExMatch in RegEx.create_from_string("\\[([^\\[\\]]+)\\]").search_all(text):
 		out += text.substr(last, matched.get_start() - last) + "‹" + markup_words(matched.get_string(1), workspace) + "›"
 		last = matched.get_end()
-	return out + text.substr(last)
+	# Emphasis marks are for the game: a summary shows the words alone.
+	return (out + text.substr(last)).replace("**", "").replace("*", "")
 
 ## Story text for a RichTextLabel: markup as short coloured words, *emphasis* shown as such.
 static func marked(text: String, workspace: PackWorkspace = null) -> String:

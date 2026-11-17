@@ -266,10 +266,16 @@ func _render(parent_key: String, host: VBoxContainer, in_fight: bool) -> void:
 	var kids := StoryBlocks.children(entries, parent_key)
 	var parent := _entry(parent_key)
 	var closing: bool = not kids.is_empty() and kids[-1].node.kind in ["choices", "goto"] and not kids[-1].node.has("inline_field")
+	# A list of responses inside other content holds responses only: no text or actions beside them.
+	var responses_only: bool = parent_key.is_empty() and row.has("script_field") and ContentDB.SCHEMA.get(row.def.type, {}).get(row.script_field, "") == "menu"
 	for entry: Dictionary in kids:
-		if closing and is_same(entry, kids[-1]): _add_row(host, parent, in_fight)
+		if closing and is_same(entry, kids[-1]) and not responses_only: _add_row(host, parent, in_fight)
 		_place(entry, host, in_fight)
-	if not closing: _add_row(host, parent, in_fight)
+	if responses_only and kids.is_empty() and row.doc.writable:
+		var first := _ghost("+ Response", "Add the first response the player can choose here.", "AddRow")
+		first.pressed.connect(func() -> void: _insert({"field": row.script_field}, "* New response", "Add a response"))
+		host.add_child(first)
+	elif not closing and not responses_only: _add_row(host, parent, in_fight)
 
 ## Gives a block its slot, and draws it now if it is in view.
 func _place(entry: Dictionary, host: VBoxContainer, in_fight: bool) -> void:

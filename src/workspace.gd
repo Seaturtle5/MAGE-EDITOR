@@ -448,8 +448,9 @@ func open_pack(folder: String) -> String:
 	reindex()
 	history.applying = false
 	history.reset(documents)
+	# A small pack is checked at once. A large one opens first: its check
+	# follows on another thread (see request_check()).
 	if rows.size() <= LIGHT: validate()
-	else: check_working()
 	return ""
 
 
@@ -604,6 +605,22 @@ func reindex() -> void:
 	history.checkpoint(documents)
 
 var _checks: Dictionary = {}
+var _check_blocks: Dictionary = {}
+
+## What the story compiler says about one definition: [[line offset, message]].
+## Kept per block text, so only a definition that changed is compiled again.
+func _block_problems(definition: FscParser.Definition, doc: PackDocument) -> Array:
+	var key := str(definition.type) + "\n" + doc.block(definition)
+	if _check_blocks.has(key): return _check_blocks[key]
+	var out: Array = []
+	var scripts: Array = [definition.nodes] if definition.type in ["scene", "text"] else []
+	for field_key: String in definition.fields:
+		if ContentDB.SCHEMA.get(definition.type, {}).get(field_key, "") == "script": scripts.append(StoryGraph.script_nodes({"def": definition, "doc": doc, "script_field": field_key}))
+	for nodes: Array in scripts:
+		for problem: Dictionary in Program.compile(definition.id, nodes, doc.path).errors: out.append([int(problem.line) - int(definition.line), problem.message])
+	if _check_blocks.size() > 60000: _check_blocks.clear()
+	_check_blocks[key] = out
+	return out
 
 ## What the parser and the story compiler say about one file of the working pack.
 func _check_document(doc: PackDocument) -> Array:
@@ -613,12 +630,8 @@ func _check_document(doc: PackDocument) -> Array:
 	var result := doc.parsed()
 	found.append_array(result.diagnostics.duplicate(true))
 	for definition: FscParser.Definition in result.definitions:
-		var scripts: Array = [definition.nodes] if definition.type in ["scene", "text"] else []
-		for field_key: String in definition.fields:
-			if ContentDB.SCHEMA.get(definition.type, {}).get(field_key, "") == "script": scripts.append(StoryGraph.script_nodes({"def": definition, "doc": doc, "script_field": field_key}))
-		for nodes: Array in scripts:
-			for problem: Dictionary in Program.compile(definition.id, nodes, doc.path).errors:
-				found.append({"severity": "error", "path": doc.path, "line": problem.line, "message": problem.message})
+		for problem: Array in _block_problems(definition, doc):
+			found.append({"severity": "error", "path": doc.path, "line": int(definition.line) + int(problem[0]), "message": problem[1]})
 	_checks[doc.path] = {"version": doc.version, "doc": doc, "found": found}
 	return found
 

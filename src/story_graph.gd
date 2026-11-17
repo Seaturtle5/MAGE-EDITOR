@@ -16,6 +16,10 @@ static func structure(row: Dictionary) -> Array[Dictionary]:
 	var roots := script_nodes(row).duplicate()
 	if row.def.type == "menu" and not row.has("script_field") and not row.def.options.is_empty():
 		roots.append({"kind": "choices", "line": row.def.options[0].line, "options": row.def.options})
+	elif row.has("script_field") and ContentDB.SCHEMA.get(row.def.type, {}).get(row.script_field, "") == "menu":
+		# A list of responses inside other content (what can be done at a place, a creature's attacks).
+		var options := choices(row)
+		if not options.is_empty(): roots.append({"kind": "choices", "line": options[0].line, "options": options})
 	_structure_nodes(roots, end_line, "", lines, result)
 	return result
 
