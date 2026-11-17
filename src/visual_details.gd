@@ -915,6 +915,9 @@ func _add_field(key: String, kind: String) -> void:
 		long_text.focus_exited.connect(_save_text.bind(key, long_text))
 		body.add_child(long_text)
 		return
+	if REFERENCES.has(key) and kind in ["text", "list"] and (field == null or field.children.is_empty()) and RegEx.create_from_string("^[a-z0-9_.-]+(, ?[a-z0-9_.-]+)*$|^$").search(value) != null:
+		_add_reference_field(key, kind == "list", value)
+		return
 	var line := HBoxContainer.new()
 	body.add_child(line)
 	var input := LineEdit.new()
@@ -961,6 +964,29 @@ func _add_field(key: String, kind: String) -> void:
 		choose.disabled = not doc.writable
 		choose.pressed.connect(_open_reference.bind(key))
 		line.add_child(choose)
+
+## Other content this content names (its picture, its home, the areas it is
+## found in): chosen by name from the loaded packs, or dropped from the library.
+func _add_reference_field(key: String, several: bool, value: String) -> void:
+	var types: Array = REFERENCES[key]
+	if not row.doc.writable:
+		var names: Array[String] = []
+		for id: String in value.split(",", false): names.append(BlockCatalog.content_label(str(types[0]), id.strip_edges(), workspace))
+		body.add_child(AuthoringLayout.label(", ".join(names) if not names.is_empty() else "Not set", 15, names.is_empty()))
+		return
+	var spec := {"name": key, "kind": ("ids." if several else "") + str(types[0]), "default": "", "hidden": false, "optional": true, "types": types}
+	var chosen := SlotControl.make(workspace, spec, value)
+	chosen.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chosen.edited.connect(func() -> void:
+		var next := chosen.value()
+		if next == value: return
+		if next.is_empty():
+			_clear_item_field(key)
+			return
+		if _set_value(key, next):
+			for id: String in next.split(",", false):
+				for type: String in types: workspace.require_content(type, id.strip_edges()))
+	body.add_child(chosen)
 
 const MOMENT_WORDS := {"each turn": "Every turn", "day starts": "When day starts", "night starts": "When night starts", "captivity starts": "When a captivity starts", "captivity round": "Each round of a captivity", "after sex": "After sex", "player hits": "When the player hits in a fight", "after resting": "After resting", "instead of resting": "Instead of resting", "game starts": "When the game starts", "while travelling": "While travelling", "instead of talking to ": "Instead of talking to…", "instead of sex with ": "Instead of sex with…", "after using ": "After using the item…",
 	"infection": "Whenever the player is infected", "player's turn": "At the player's turn in a fight", "after import": "After earlier progress is imported", "arriving": "When the player arrives at a place",

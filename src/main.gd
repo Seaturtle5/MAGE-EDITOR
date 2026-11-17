@@ -1094,7 +1094,10 @@ func _refresh_browser() -> void:
 	for row: Dictionary in workspace.rows:
 		var definition: FscParser.Definition = row.def
 		if not _matches_group(definition.type): continue
-		if not query.is_empty() and query not in (Wording.title(row) + " " + definition.id + " " + Wording.name(definition.type) + " " + definition.type + " " + row.pack).to_lower(): continue
+		if not query.is_empty():
+			# The words a row is found by are put together once and kept on the row.
+			if not row.has("find"): row.find = (Wording.title(row) + " " + definition.id + " " + Wording.name(definition.type) + " " + definition.type + " " + row.pack).to_lower()
+			if query not in row.find: continue
 		var table: Dictionary = mine if row.doc.writable else others
 		var key: String = definition.type if row.doc.writable else row.pack
 		if not table.has(key): table[key] = []
@@ -1450,14 +1453,33 @@ func _report_check() -> void:
 		side_tabs.current_tab = 2
 	_set_status("Checked with the game engine, unsaved changes included: " + ("no problems." if workspace.diagnostics.is_empty() else "%d problem%s, %d note%s." % [errors, "" if errors == 1 else "s", workspace.diagnostics.size() - errors, "" if workspace.diagnostics.size() - errors == 1 else "s"]))
 
+## Notes about other packs (a missing picture in someone else's pack) are counted, not listed.
+var show_other_notes := false
+
 func _refresh_diagnostics() -> void:
 	if diagnostics_list == null: return
 	diagnostics_list.clear()
 	var errors := 0
+	var mine: Array = []
+	var theirs: Array = []
+	var notes := 0
 	for item: Dictionary in workspace.diagnostics:
-		if item.severity == "error": errors += 1
-		diagnostics_list.add_item("%s  %s, line %d\n%s" % ["⚠ Problem" if item.severity == "error" else "Note", str(item.path).get_file(), int(item.line), item.message])
+		var own: bool = str(item.path).begins_with(workspace.target + "/")
+		if item.severity == "error":
+			errors += 1
+			if own: mine.push_front(item)
+			else: theirs.push_front(item)
+		elif own: mine.append(item)
+		elif show_other_notes: theirs.append(item)
+		else: notes += 1
+	for item: Dictionary in mine + theirs:
+		diagnostics_list.add_item("%s %s\n      %s, line %d%s" % ["⚠" if item.severity == "error" else "ℹ", item.message, str(item.path).get_file(), int(item.line), "" if str(item.path).begins_with(workspace.target + "/") else "  ·  in another pack"])
 		diagnostics_list.set_item_metadata(diagnostics_list.item_count - 1, item)
+		if item.severity == "error": diagnostics_list.set_item_custom_fg_color(diagnostics_list.item_count - 1, EditorTheme.color("bad"))
+	if notes > 0:
+		diagnostics_list.add_item("… and %d note%s about other packs. Double-click to list them." % [notes, "" if notes == 1 else "s"])
+		diagnostics_list.set_item_metadata(diagnostics_list.item_count - 1, {"more": true})
+	if diagnostics_list.item_count == 0: diagnostics_list.add_item("✓ Nothing to report.")
 	if check_state != null and (workspace.loading or workspace.checking):
 		check_state.text = "⏳" if compact else ("⏳ Loading packs…" if workspace.loading else "⏳ Checking…")
 		check_state.tooltip_text = "The packs beside yours are being loaded. You can already work." if workspace.loading else "The game engine is checking your pack against the others. You can keep working."
@@ -1471,13 +1493,19 @@ func _refresh_diagnostics() -> void:
 ## Opens the place a problem is in: the block of a story, or the content's details.
 func _open_problem(diagnostic: Dictionary) -> void:
 	for index in diagnostics_list.item_count:
+		if not diagnostics_list.get_item_metadata(index) is Dictionary or diagnostics_list.get_item_metadata(index).has("more"): continue
 		var listed: Dictionary = diagnostics_list.get_item_metadata(index)
 		if listed.path == diagnostic.path and int(listed.line) == int(diagnostic.line) and listed.message == diagnostic.message:
 			_open_diagnostic(index)
 			return
 
 func _open_diagnostic(index: int) -> void:
+	if not diagnostics_list.get_item_metadata(index) is Dictionary: return
 	var diagnostic: Dictionary = diagnostics_list.get_item_metadata(index)
+	if diagnostic.has("more"):
+		show_other_notes = true
+		_refresh_diagnostics()
+		return
 	var opened := _open_line(str(diagnostic.path), int(diagnostic.line))
 	if not opened.is_empty(): _set_status("Problem in %s: %s" % [Wording.title(opened), diagnostic.message])
 

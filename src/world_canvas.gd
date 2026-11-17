@@ -49,6 +49,15 @@ func _ready() -> void:
 	arrange.tooltip_text = "Lay the places out as the game's own map does: north up, east right, from their exits."
 	arrange.pressed.connect(arrange_like_game)
 	toolbar.add_child(arrange)
+	var world := CheckButton.new()
+	world.text = "Every place"
+	world.tooltip_text = "Show the places of every loaded pack, not only yours and the ones they touch (at most %d)." % MAX_PLACES
+	world.toggled.connect(func(on: bool) -> void:
+		show_world = on
+		refresh())
+	world.hide()
+	world_switch = world
+	toolbar.add_child(world)
 	var fit := Button.new()
 	fit.text = "Fit places"
 	fit.pressed.connect(_fit_places)
@@ -60,6 +69,9 @@ func _ready() -> void:
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(hint)
+	scope_note = AuthoringLayout.label("", 12, true)
+	scope_note.hide()
+	add_child(scope_note)
 	graph = DropSurface.new()
 	graph.workspace = workspace
 	graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -168,6 +180,14 @@ func _moved(_from: Vector2, to: Vector2, id: String) -> void:
 	DirAccess.make_dir_recursive_absolute(_layout_file().get_base_dir())
 	config.save(_layout_file())
 
+## At most this many places are drawn.
+const MAX_PLACES := 200
+## More places than this, with other packs loaded, and the map shows only yours and their neighbours.
+const CROWDED := 60
+var show_world := false
+var scope_note: Label
+var world_switch: CheckButton
+
 func refresh() -> void:
 	if workspace == null or graph == null:
 		return
@@ -245,6 +265,31 @@ func refresh() -> void:
 		var display: Dictionary = places[index].duplicate()
 		display.effective = content.get_def("location", display.def.id)
 		places[index] = display
+	# With a whole game loaded the map shows your own places and what touches
+	# them, not every place there is.
+	var every := places.size()
+	var crowded: bool = workspace.pack_paths.size() > 1 and every > CROWDED
+	if crowded and not show_world:
+		var mine: Dictionary = {}
+		for path: String in workspace._own_rows:
+			for own: Dictionary in workspace._own_rows[path].rows:
+				if own.def.type == "location": mine[own.def.id] = true
+		var near: Dictionary = {}
+		for id: String in exits_by_place:
+			for entry: Dictionary in exits_by_place[id]:
+				if mine.has(id): near[entry.target] = true
+				if mine.has(entry.target): near[id] = true
+		for home: String in people:
+			if people[home].any(func(person: Dictionary) -> bool: return person.doc.writable): near[home] = true
+		for place: String in events_at:
+			if events_at[place].any(func(event: Dictionary) -> bool: return event.doc.writable): near[place] = true
+		var chosen: Array[Dictionary] = places.filter(func(place: Dictionary) -> bool: return mine.has(place.def.id) or near.has(place.def.id))
+		if not chosen.is_empty(): places = chosen
+	if places.size() > MAX_PLACES: places = places.slice(0, MAX_PLACES)
+	if world_switch != null: world_switch.visible = crowded
+	if scope_note != null:
+		scope_note.visible = crowded
+		scope_note.text = ("Every place of the loaded packs" if show_world else "Your places and the places they touch") + ": %d of %d." % [places.size(), every]
 	var place_names: Dictionary = {}
 	var region_bounds: Dictionary = {}
 	for place: Dictionary in places:
