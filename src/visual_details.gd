@@ -1064,7 +1064,7 @@ func _add_reference_field(key: String, several: bool, value: String) -> void:
 	body.add_child(chosen)
 
 const MOMENT_WORDS := {"each turn": "Every turn", "day starts": "When day starts", "night starts": "When night starts", "captivity starts": "When a captivity starts", "captivity round": "Each round of a captivity", "after sex": "After sex", "player hits": "When the player hits in a fight", "after resting": "After resting", "instead of resting": "Instead of resting", "game starts": "When the game starts", "while travelling": "While travelling", "instead of talking to ": "Instead of talking to…", "instead of sex with ": "Instead of sex with…", "after using ": "After using the item…",
-	"infection": "Whenever the player is infected", "player's turn": "At the player's turn in a fight", "after import": "After earlier progress is imported", "arriving": "When the player arrives at a place",
+	"infection": "Whenever the player is infected", "player's turn": "At the player's turn in a fight", "after import": "After earlier progress is imported", "arriving": "When the player arrives at a place", "hunting": "When the player hunts for a creature",
 	"after taking trophy ": "After taking the trophy…", "after picking up ": "After picking up the item…", "instead of using ": "Instead of using the item…", "before picking up ": "Before picking up the item…"}
 
 ## When a hook runs: one of the engine's moments, some about one character or item.

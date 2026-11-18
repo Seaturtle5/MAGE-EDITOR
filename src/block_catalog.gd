@@ -191,6 +191,7 @@ const ACTIONS := [
 	["creature_change.image", "Creatures", "{creature}'s picture becomes {image}", "creature {creature:creature} image {image:image}", "creature picture image"],
 	["creature_change.strike", "Creatures", "{creature} now strikes with {stat}", "creature {creature:creature} strike with {stat:@attribute}", "creature strike attribute"],
 	["creature_change", "Creatures", "{creature} now {field} {value}", "creature {creature:creature} {field:@creature_field} {value:plain}", "creature title special change"],
+	["hunt_extra", "Creatures", "{creature} may turn up in this hunt[, {times} times]", "hunt may meet {creature:creature}[ {times:amount} {_s:times|time}]", "hunt hunting join draw creature hunts the player", "", "In a story that plays when the player hunts: puts a creature into the draw of that hunt."],
 	# Intimacy and pregnancy.
 	["sex", "Intimacy", "Record sex: {taker} receives {act} from {giver}", "sex {taker:who} receives {act:word.act} from {giver:who}", "sex intimacy virginity partner record", "", "Records the act for virginity, partners and pregnancy chances."],
 	["impregnate", "Pregnancy", "{how}[ ({kind})][ by {father}][ ({eggs})]", "{how:@pregnancy}[ {kind:female|male|self}][ by {father:father}][ {eggs:?with eggs}]", "pregnancy impregnate chance father eggs"],
