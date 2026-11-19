@@ -95,7 +95,7 @@ const MESSAGE_FIELDS := {
 ## One word that groups or names a kind; the words other content uses are offered beside the box.
 const WORD_FIELDS := {
 	"feat": ["group"], "interest": ["group"], "ending": ["type"], "creature": ["special"],
-	"item": ["rest", "icon"], "location": ["rest"], "collection": ["of"], "pack": ["feedback webhook"], "status_bar": ["start date", "sheet"],
+	"item": ["rest", "icon"], "location": ["rest"], "collection": ["of"], "pack": ["feedback webhook", "feedback receiver"], "status_bar": ["start date", "sheet"],
 	"event": ["blocks"], "level": ["default", "from"], "heat_rules": ["default"], "filter": ["group", "from"], "tag": ["group", "from"],
 	"save_import": ["file", "rows", "player row", "nowhere", "ignore", "when missing", "map like", "turn stamps"]
 }
