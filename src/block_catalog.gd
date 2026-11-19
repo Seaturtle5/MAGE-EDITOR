@@ -219,6 +219,7 @@ const ACTIONS := [
 	["player_move", "Fights", "The player {move}", "{move:@player_move}", "player attack flee move", "fight"],
 	["infects_as", "Fights", "This fight infects as {creature}", "this fight infects as {creature:creature}", "fight infection strain", "fight"],
 	["no_infection", "Fights", "This fight does not infect", "this fight does not infect", "fight no infection safe", "fight"],
+	["no_aftermath", "Fights", "Leave out the beaten creature's scene", "no aftermath", "skip after fight scene defeated aftermath control", "fight", "In the fight rules' story before the aftermath: the creature's scene after its defeat does not play."],
 	# Lists, companions, moments, collections and gear in play.
 	["list_set", "Lists", "Replace entry number {index} of the list {list} with {to}", "entry {index:expr=1} of {list:value.list} = {to:expr=1}", "list entry replace change position", "", "Puts another number or text in one place of a list. Entry 1 is the first."],
 	["tame_all", "Companions", "Every companion can now be summoned", "tame all companions", "tame all companions pets summon everyone"],
